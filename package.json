@@ -1,0 +1,26 @@
+{
+  "name": "loadpolus.npplugin",
+  "version": "4.2.0",
+  "description": "LoadPolus plugin for NodePolus",
+  "main": "index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PolusGG/loadpolus-plugin.git"
+  },
+  "keywords": [
+    "stupid"
+  ],
+  "author": "Saghetti",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/PolusGG/loadpolus-plugin/issues"
+  },
+  "homepage": "https://github.com/PolusGG/loadpolus-plugin#readme",
+  "dependencies": {
+    "@types/ioredis": "^4.19.4",
+    "ioredis": "^4.22.0"
+  }
+}
