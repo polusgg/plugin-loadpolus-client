@@ -1,6 +1,6 @@
-import { GameState, Language, Level } from "@nodepolus/nodepolus/lib/types/enums";
-import { LobbyInstance } from "@nodepolus/nodepolus/lib/api/lobby";
-import { BasePlugin } from "@nodepolus/nodepolus/lib/api/plugin";
+import { GameState, Language, Level } from "@nodepolus/framework/src/types/enums";
+import { LobbyInstance } from "@nodepolus/framework/src/api/lobby";
+import { BasePlugin } from "@nodepolus/framework/src/api/plugin";
 import Redis from "ioredis";
 
 type Config = {
