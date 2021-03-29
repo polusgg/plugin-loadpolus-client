@@ -1,20 +1,18 @@
 {
-  "name": "loadpolus-plugin",
+  "name": "@polusgg/plugin-loadpolus-client",
+  "np-plugin": true,
   "version": "1.0.0",
-  "description": "Load Balancer plugin for Polus.gg",
-  "scripts": {
-    "start": "ts-node index"
-  },
+  "description": "Load balancer client plugin for NodePolus",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/PolusGG/loadpolus-plugin.git"
+    "url": "git+https://github.com/polusgg/plugin-loadpolus-client.git"
   },
   "author": "Saghetti",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/PolusGG/loadpolus-plugin/issues"
+    "url": "https://github.com/polusgg/plugin-loadpolus-client/issues"
   },
-  "homepage": "https://github.com/PolusGG/loadpolus-plugin",
+  "homepage": "https://github.com/polusgg/plugin-loadpolus-client",
   "devDependencies": {
     "@types/ioredis": "^4.22.0",
     "@types/node": "^14.14.22",
@@ -25,8 +23,7 @@
     "typescript": "^4.1.3"
   },
   "dependencies": {
-    "@nodepolus/framework": "^3.0.0",
-    "ioredis": "^4.22.0",
-    "ts-node": "^9.1.0"
+    "@nodepolus/framework": "latest",
+    "ioredis": "^4.22.0"
   }
 }
