@@ -57,7 +57,7 @@ export default class extends BasePlugin {
     this.server.on("player.left", event => this.updateCurrentPlayers(event.getLobby()));
     this.server.on("player.kicked", event => this.updateCurrentPlayers(event.getLobby()));
     this.server.on("player.banned", event => this.updateCurrentPlayers(event.getLobby()));
-    this.server.on("server.lobby.list", event => event.cancel());
+    this.server.on("server.lobby.list", event => { event.cancel() });
     this.server.on("game.started", event => this.updateGameState(event.getGame().getLobby()));
     this.server.on("game.ended", event => this.updateGameState(event.getGame().getLobby()));
 
