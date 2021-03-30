@@ -1,7 +1,7 @@
 {
   "name": "@polusgg/plugin-loadpolus-client",
   "np-plugin": true,
-  "version": "1.0.1-2",
+  "version": "1.0.1-3",
   "description": "Load balancer client plugin for NodePolus",
   "repository": {
     "type": "git",
