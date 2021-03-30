@@ -1,30 +1,39 @@
 import { GameState, Language, Level } from "@nodepolus/framework/src/types/enums";
 import { LobbyInstance } from "@nodepolus/framework/src/api/lobby";
 import { BasePlugin } from "@nodepolus/framework/src/api/plugin";
+import { AllRequired } from "@nodepolus/framework/src/types";
 import Redis from "ioredis";
+import os from "os";
 
-type Config = {
-  name: string;
+type LoadPolusConfig = {
+  nodeName: string;
+  redis: {
+    host: string,
+    port: number,
+  }
 };
 
-export default class extends BasePlugin {
-  private readonly redis: Redis.Redis;
-  private readonly config: Config;
+const defaultConfig: Readonly<AllRequired<LoadPolusConfig>> = {
+  nodeName: os.hostname(),
+  redis: {
+    port: 6379,
+    host: "127.0.0.1",
+  },
+};
 
-  constructor() {
+export default class extends BasePlugin<LoadPolusConfig> {
+  private readonly redis: Redis.Redis;
+
+  constructor(config: LoadPolusConfig) {
     super({
       name: "LoadPolus",
       version: [1, 0, 0],
-    });
+    }, defaultConfig, config);
 
     this.redis = new Redis({
-      port: 6379,
-      host: "127.0.0.1",
+      host: this.getRedisHost(),
+      port: this.getRedisPort(),
     });
-
-    this.config = {
-      name: "local",
-    };
 
     this.server.on("server.lobby.created", event => {
       const lobby = event.getLobby();
@@ -43,14 +52,14 @@ export default class extends BasePlugin {
         "public": lobby.isPublic() ? "true" : "false",
       });
 
-      this.redis.sadd(`loadpolus.node.${this.config.name}.lobbies`, lobby.getCode());
+      this.redis.sadd(`loadpolus.node.${this.getNodeName()}.lobbies`, lobby.getCode());
     });
 
     this.server.on("server.lobby.destroyed", event => {
       const code = event.getLobby().getCode();
 
       this.redis.del(`loadpolus.lobby.${code}`);
-      this.redis.srem(`loadpolus.node.${this.config.name}.lobbies`, code);
+      this.redis.srem(`loadpolus.node.${this.getNodeName()}.lobbies`, code);
     });
 
     this.server.on("player.joined", event => this.updateCurrentPlayers(event.getLobby()));
@@ -74,7 +83,7 @@ export default class extends BasePlugin {
       currentConnections: lobby.getConnections().length,
     });
 
-    this.redis.hmset(`loadpolus.node.${this.config.name}`, {
+    this.redis.hmset(`loadpolus.node.${this.getNodeName()}`, {
       currentConnections: this.server.getConnections().size,
     });
   }
@@ -83,5 +92,17 @@ export default class extends BasePlugin {
     this.redis.hmset(`loadpolus.lobby.${lobby.getCode()}`, {
       gameState: GameState[lobby.getGameState()],
     });
+  }
+
+  private getNodeName(): string {
+    return this.config?.nodeName ?? defaultConfig.nodeName;
+  }
+
+  private getRedisHost(): string {
+    return this.config?.redis?.host ?? defaultConfig.redis.host;
+  }
+
+  private getRedisPort(): number {
+    return this.config?.redis?.port ?? defaultConfig.redis.port;
   }
 }
