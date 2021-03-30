@@ -6,11 +6,11 @@ import Redis from "ioredis";
 import os from "os";
 
 type LoadPolusConfig = {
-  nodeName: string;
-  redis: {
-    host: string,
-    port: number,
-  }
+  nodeName?: string;
+  redis?: {
+    host?: string;
+    port?: number;
+  };
 };
 
 const defaultConfig: Readonly<AllRequired<LoadPolusConfig>> = {
