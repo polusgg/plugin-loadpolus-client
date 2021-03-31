@@ -17,8 +17,8 @@ type LoadPolusConfig = {
 const defaultConfig: Readonly<AllRequired<LoadPolusConfig>> = {
   nodeName: os.hostname(),
   redis: {
-    port: 6379,
     host: "127.0.0.1",
+    port: 6379,
     password: "",
   },
 };
@@ -32,11 +32,14 @@ export default class extends BasePlugin<LoadPolusConfig> {
       version: [1, 0, 0],
     }, defaultConfig, config);
 
-    this.redis = new Redis({
-      host: this.getRedisHost(),
-      port: this.getRedisPort(),
-      password: this.getRedisPassword(),
-    });
+    const redisPort = parseInt(process.env.NP_REDIS_PORT ?? "", 10);
+
+    config.redis ??= {};
+    config.redis.host = process.env.NP_REDIS_HOST?.trim() ?? config.redis.host ?? defaultConfig.redis.host;
+    config.redis.port = Number.isInteger(redisPort) ? redisPort : config.redis.port ?? defaultConfig.redis.port;
+    config.redis.password = process.env.NP_REDIS_PASSWORD?.trim() ?? undefined;
+
+    this.redis = new Redis(config.redis);
 
     this.server.on("server.lobby.created", event => {
       const lobby = event.getLobby();
@@ -99,17 +102,5 @@ export default class extends BasePlugin<LoadPolusConfig> {
 
   private getNodeName(): string {
     return this.config?.nodeName ?? defaultConfig.nodeName;
-  }
-
-  private getRedisHost(): string {
-    return this.config?.redis?.host ?? defaultConfig.redis.host;
-  }
-
-  private getRedisPort(): number {
-    return this.config?.redis?.port ?? defaultConfig.redis.port;
-  }
-
-  private getRedisPassword(): string {
-    return this.config?.redis?.password ?? defaultConfig.redis.password;
   }
 }
