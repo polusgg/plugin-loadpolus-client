@@ -10,6 +10,7 @@ type LoadPolusConfig = {
   redis?: {
     host?: string;
     port?: number;
+    password?: string;
   };
 };
 
@@ -18,6 +19,7 @@ const defaultConfig: Readonly<AllRequired<LoadPolusConfig>> = {
   redis: {
     port: 6379,
     host: "127.0.0.1",
+    password: "",
   },
 };
 
@@ -33,6 +35,7 @@ export default class extends BasePlugin<LoadPolusConfig> {
     this.redis = new Redis({
       host: this.getRedisHost(),
       port: this.getRedisPort(),
+      password: this.getRedisPassword(),
     });
 
     this.server.on("server.lobby.created", event => {
@@ -104,5 +107,9 @@ export default class extends BasePlugin<LoadPolusConfig> {
 
   private getRedisPort(): number {
     return this.config?.redis?.port ?? defaultConfig.redis.port;
+  }
+
+  private getRedisPassword(): string {
+    return this.config?.redis?.password ?? defaultConfig.redis.password;
   }
 }
