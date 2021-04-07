@@ -1,16 +1,19 @@
 import { GameState, Language, Level } from "@nodepolus/framework/src/types/enums";
 import { LobbyInstance } from "@nodepolus/framework/src/api/lobby";
 import { BasePlugin } from "@nodepolus/framework/src/api/plugin";
+import * as dockerIp from "docker-ip-get";
 import Redis from "ioredis";
 import os from "os";
 
 type LoadPolusConfig = {
   nodeName?: string;
+  publicIp?: string;
   redis?: Redis.RedisOptions;
 };
 
 export default class extends BasePlugin<LoadPolusConfig> {
   private readonly redis: Redis.Redis;
+  private publicIp?: string;
 
   constructor(config: LoadPolusConfig) {
     super({
@@ -25,6 +28,8 @@ export default class extends BasePlugin<LoadPolusConfig> {
     config.redis.port = Number.isInteger(redisPort) ? redisPort : config.redis.port ?? 6379;
     config.redis.password = process.env.NP_REDIS_PASSWORD?.trim() ?? undefined;
 
+    this.setPublicIp();
+
     if (config.redis.host.startsWith("rediss://")) {
       config.redis.host = config.redis.host.substr("rediss://".length);
       config.redis.tls = {};
@@ -38,7 +43,7 @@ export default class extends BasePlugin<LoadPolusConfig> {
       const options = lobby.getOptions();
 
       this.redis.hmset(`loadpolus.lobby.${lobby.getCode()}`, {
-        host: this.server.getDefaultLobbyAddress(),
+        host: this.publicIp ?? this.server.getDefaultLobbyAddress(),
         port: this.server.getDefaultLobbyPort(),
         level: Level[options.getLevels()[0]],
         impostorCount: options.getImpostorCount(),
@@ -94,5 +99,11 @@ export default class extends BasePlugin<LoadPolusConfig> {
 
   private getNodeName(): string {
     return this.config?.nodeName ?? os.hostname();
+  }
+
+  private async setPublicIp(): Promise<void> {
+    this.publicIp = process.env.NP_DROPLET_ADDRESS?.trim()
+                 ?? this.config?.publicIp
+                 ?? (dockerIp.isInDocker() ? await dockerIp.getHostIp() : undefined);
   }
 }
