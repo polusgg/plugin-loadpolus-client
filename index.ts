@@ -71,7 +71,7 @@ export default class extends BasePlugin<LoadPolusConfig> {
     this.redis = new Redis(config.redis);
 
     this.redis.on("connect", () => {
-      console.log(`Redis connected to ${config.redis?.host}:${config.redis?.port}`);
+      this.getLogger().info(`Redis connected to ${config.redis?.host}:${config.redis?.port}`);
 
       this.redis.sadd("loadpolus.nodes", this.nodeName);
       this.redis.hmset(
@@ -153,6 +153,8 @@ export default class extends BasePlugin<LoadPolusConfig> {
                  ?? this.config?.nodeName
                  ?? (isInDocker() ? await getDropletName() : undefined)
                  ?? this.nodeName;
+
+    this.getLogger().info(`MY HOSTNAME IS ${this.nodeName}`);
   }
 
   private async setNodeAddress(): Promise<void> {
@@ -160,5 +162,7 @@ export default class extends BasePlugin<LoadPolusConfig> {
                  ?? this.config?.publicIp
                  ?? (isInDocker() ? await getDropletAddress() : undefined)
                  ?? this.nodeAddress;
+
+    this.getLogger().info(`MY ADDRESS IS ${this.nodeAddress}`);
   }
 }
