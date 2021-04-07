@@ -1,26 +1,12 @@
 import { GameState, Language, Level } from "@nodepolus/framework/src/types/enums";
 import { LobbyInstance } from "@nodepolus/framework/src/api/lobby";
 import { BasePlugin } from "@nodepolus/framework/src/api/plugin";
-import { AllRequired } from "@nodepolus/framework/src/types";
 import Redis from "ioredis";
 import os from "os";
 
 type LoadPolusConfig = {
   nodeName?: string;
-  redis?: {
-    host?: string;
-    port?: number;
-    password?: string;
-  };
-};
-
-const defaultConfig: Readonly<AllRequired<LoadPolusConfig>> = {
-  nodeName: os.hostname(),
-  redis: {
-    host: "127.0.0.1",
-    port: 6379,
-    password: "",
-  },
+  redis?: Redis.RedisOptions;
 };
 
 export default class extends BasePlugin<LoadPolusConfig> {
@@ -30,14 +16,20 @@ export default class extends BasePlugin<LoadPolusConfig> {
     super({
       name: "LoadPolus",
       version: [1, 0, 0],
-    }, defaultConfig, config);
+    }, undefined, config);
 
     const redisPort = parseInt(process.env.NP_REDIS_PORT ?? "", 10);
 
     config.redis ??= {};
-    config.redis.host = process.env.NP_REDIS_HOST?.trim() ?? config.redis.host ?? defaultConfig.redis.host;
-    config.redis.port = Number.isInteger(redisPort) ? redisPort : config.redis.port ?? defaultConfig.redis.port;
+    config.redis.host = process.env.NP_REDIS_HOST?.trim() ?? config.redis.host ?? "127.0.0.1";
+    config.redis.port = Number.isInteger(redisPort) ? redisPort : config.redis.port ?? 6379;
     config.redis.password = process.env.NP_REDIS_PASSWORD?.trim() ?? undefined;
+
+    if (config.redis.host.startsWith("rediss://")) {
+      config.redis.host = config.redis.host.substr("rediss://".length);
+      config.redis.tls = {};
+      config.redis.connectTimeout = 30000;
+    }
 
     this.redis = new Redis(config.redis);
 
@@ -101,6 +93,6 @@ export default class extends BasePlugin<LoadPolusConfig> {
   }
 
   private getNodeName(): string {
-    return this.config?.nodeName ?? defaultConfig.nodeName;
+    return this.config?.nodeName ?? os.hostname();
   }
 }
