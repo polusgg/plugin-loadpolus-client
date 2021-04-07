@@ -24,7 +24,6 @@
   },
   "dependencies": {
     "@nodepolus/framework": "latest",
-    "docker-ip-get": "^1.1.5",
     "ioredis": "^4.22.0"
   }
 }

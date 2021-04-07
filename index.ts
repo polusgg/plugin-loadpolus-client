@@ -1,9 +1,22 @@
 import { GameState, Language, Level } from "@nodepolus/framework/src/types/enums";
 import { LobbyInstance } from "@nodepolus/framework/src/api/lobby";
 import { BasePlugin } from "@nodepolus/framework/src/api/plugin";
-import * as dockerIp from "docker-ip-get";
+import childProcess from "child_process";
+import { readFileSync } from "fs";
 import Redis from "ioredis";
 import os from "os";
+
+const isInDocker = (): boolean => {
+  const platform = os.platform();
+
+  if (platform === "darwin" || platform === "win32") {
+    return false;
+  }
+
+  const file = readFileSync("/proc/self/cgroup", "utf-8");
+
+  return file.indexOf("/docker") !== -1;
+};
 
 type LoadPolusConfig = {
   nodeName?: string;
@@ -101,9 +114,22 @@ export default class extends BasePlugin<LoadPolusConfig> {
     return this.config?.nodeName ?? os.hostname();
   }
 
-  private async setPublicIp(): Promise<void> {
-    this.publicIp = process.env.NP_DROPLET_ADDRESS?.trim()
-                 ?? this.config?.publicIp
-                 ?? (dockerIp.isInDocker() ? await dockerIp.getHostIp() : undefined);
+  private setPublicIp(): void {
+    childProcess.execFile("/sbin/ip", ["route"], (_error, stdout, _stderr) => {
+      let ip: string | undefined;
+
+      if (stdout.length > 0) {
+        const output = stdout;
+        const match = output.match(/default via ((?:[0-9]{1,3}\.){3}[0-9]{1,3}) dev eth0/);
+
+        if (Array.isArray(match) && match.length >= 2) {
+          ip = match[1];
+        }
+      }
+
+      this.publicIp = process.env.NP_DROPLET_ADDRESS?.trim()
+                   ?? this.config?.publicIp
+                   ?? (isInDocker() ? ip : undefined);
+    });
   }
 }
