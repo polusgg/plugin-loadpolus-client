@@ -43,6 +43,7 @@ type LoadPolusConfig = {
 export default class extends BasePlugin<LoadPolusConfig> {
   private readonly redis: Redis.Redis;
 
+  private registered = false;
   private nodeName = os.hostname();
   private nodeAddress = this.server.getDefaultLobbyAddress();
 
@@ -69,6 +70,12 @@ export default class extends BasePlugin<LoadPolusConfig> {
 
     this.redis.on("connect", async () => {
       this.getLogger().info(`Redis connected to ${config.redis!.host}:${config.redis!.port}`);
+
+      if (this.registered) {
+        return;
+      }
+
+      this.registered = true;
 
       await this.setNodeName();
       await this.setNodeAddress();
