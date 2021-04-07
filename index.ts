@@ -59,19 +59,19 @@ export default class extends BasePlugin<LoadPolusConfig> {
     config.redis.port = Number.isInteger(redisPort) ? redisPort : config.redis.port ?? 6379;
     config.redis.password = process.env.NP_REDIS_PASSWORD?.trim() ?? undefined;
 
-    this.setNodeName();
-    this.setNodeAddress();
-
     if (config.redis.host.startsWith("rediss://")) {
       config.redis.host = config.redis.host.substr("rediss://".length);
       config.redis.tls = {};
       config.redis.connectTimeout = 30000;
     }
 
-    this.redis = new Redis(config.redis);
+    this.redis = new Redis(this.config!.redis);
 
-    this.redis.on("connect", () => {
-      this.getLogger().info(`Redis connected to ${config.redis?.host}:${config.redis?.port}`);
+    this.redis.on("connect", async () => {
+      this.getLogger().info(`Redis connected to ${config.redis!.host}:${config.redis!.port}`);
+
+      await this.setNodeName();
+      await this.setNodeAddress();
 
       this.redis.sadd("loadpolus.nodes", this.nodeName);
       this.redis.hmset(
@@ -82,8 +82,12 @@ export default class extends BasePlugin<LoadPolusConfig> {
         "currentConnections", "0",
         "maxConnections", `${this.server.getMaxLobbies() * this.server.getMaxPlayersPerLobby()}`,
       );
-    });
 
+      this.registerEvents();
+    });
+  }
+
+  private registerEvents(): void {
     this.server.on("server.close", () => {
       this.redis.srem("loadpolus.nodes", this.nodeName);
       this.redis.del(`loadpolus.node.${this.nodeName}`);
@@ -153,8 +157,6 @@ export default class extends BasePlugin<LoadPolusConfig> {
                  ?? this.config?.nodeName
                  ?? (isInDocker() ? await getDropletName() : undefined)
                  ?? this.nodeName;
-
-    this.getLogger().info(`MY HOSTNAME IS ${this.nodeName}`);
   }
 
   private async setNodeAddress(): Promise<void> {
@@ -162,7 +164,5 @@ export default class extends BasePlugin<LoadPolusConfig> {
                  ?? this.config?.publicIp
                  ?? (isInDocker() ? await getDropletAddress() : undefined)
                  ?? this.nodeAddress;
-
-    this.getLogger().info(`MY ADDRESS IS ${this.nodeAddress}`);
   }
 }
