@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@nodepolus/framework": "latest",
+    "got": "^11.8.2",
     "ioredis": "^4.22.0"
   }
 }

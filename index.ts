@@ -1,9 +1,9 @@
 import { GameState, Language, Level } from "@nodepolus/framework/src/types/enums";
 import { LobbyInstance } from "@nodepolus/framework/src/api/lobby";
 import { BasePlugin } from "@nodepolus/framework/src/api/plugin";
-import childProcess from "child_process";
 import { readFileSync } from "fs";
 import Redis from "ioredis";
+import got from "got";
 import os from "os";
 
 const isInDocker = (): boolean => {
@@ -18,6 +18,22 @@ const isInDocker = (): boolean => {
   return file.indexOf("/docker") !== -1;
 };
 
+const getMeta = async (path: string): Promise<string | undefined> => {
+  path = path.startsWith("/") ? path.substr(1) : path;
+
+  try {
+    const { body } = await got(`http://169.254.169.254/metadata/v1/${path}`);
+
+    return body;
+  } catch (error) {
+    return undefined;
+  }
+};
+
+const getDropletName = async (): Promise<string | undefined> => getMeta("hostname");
+
+const getDropletAddress = async (): Promise<string | undefined> => getMeta("interfaces/public/0/ipv4/address");
+
 type LoadPolusConfig = {
   nodeName?: string;
   publicIp?: string;
@@ -26,7 +42,9 @@ type LoadPolusConfig = {
 
 export default class extends BasePlugin<LoadPolusConfig> {
   private readonly redis: Redis.Redis;
-  private publicIp?: string;
+
+  private nodeName = os.hostname();
+  private nodeAddress = this.server.getDefaultLobbyAddress();
 
   constructor(config: LoadPolusConfig) {
     super({
@@ -41,7 +59,8 @@ export default class extends BasePlugin<LoadPolusConfig> {
     config.redis.port = Number.isInteger(redisPort) ? redisPort : config.redis.port ?? 6379;
     config.redis.password = process.env.NP_REDIS_PASSWORD?.trim() ?? undefined;
 
-    this.setPublicIp();
+    this.setNodeName();
+    this.setNodeAddress();
 
     if (config.redis.host.startsWith("rediss://")) {
       config.redis.host = config.redis.host.substr("rediss://".length);
@@ -51,12 +70,31 @@ export default class extends BasePlugin<LoadPolusConfig> {
 
     this.redis = new Redis(config.redis);
 
+    this.redis.on("connect", () => {
+      console.log(`Redis connected to ${config.redis?.host}:${config.redis?.port}`);
+
+      this.redis.sadd("loadpolus.nodes", this.nodeName);
+      this.redis.hmset(
+        `loadpolus.node.${this.nodeName}`,
+        "maintenance", "false",
+        "host", this.nodeAddress,
+        "port", `${this.server.getDefaultLobbyPort()}`,
+        "currentConnections", "0",
+        "maxConnections", `${this.server.getMaxLobbies() * this.server.getMaxPlayersPerLobby()}`,
+      );
+    });
+
+    this.server.on("server.close", () => {
+      this.redis.srem("loadpolus.nodes", this.nodeName);
+      this.redis.del(`loadpolus.node.${this.nodeName}`);
+    });
+
     this.server.on("server.lobby.created", event => {
       const lobby = event.getLobby();
       const options = lobby.getOptions();
 
       this.redis.hmset(`loadpolus.lobby.${lobby.getCode()}`, {
-        host: this.publicIp ?? this.server.getDefaultLobbyAddress(),
+        host: this.nodeAddress,
         port: this.server.getDefaultLobbyPort(),
         level: Level[options.getLevels()[0]],
         impostorCount: options.getImpostorCount(),
@@ -68,14 +106,14 @@ export default class extends BasePlugin<LoadPolusConfig> {
         "public": lobby.isPublic() ? "true" : "false",
       });
 
-      this.redis.sadd(`loadpolus.node.${this.getNodeName()}.lobbies`, lobby.getCode());
+      this.redis.sadd(`loadpolus.node.${this.nodeName}.lobbies`, lobby.getCode());
     });
 
     this.server.on("server.lobby.destroyed", event => {
       const code = event.getLobby().getCode();
 
       this.redis.del(`loadpolus.lobby.${code}`);
-      this.redis.srem(`loadpolus.node.${this.getNodeName()}.lobbies`, code);
+      this.redis.srem(`loadpolus.node.${this.nodeName}.lobbies`, code);
     });
 
     this.server.on("player.joined", event => this.updateCurrentPlayers(event.getLobby()));
@@ -99,7 +137,7 @@ export default class extends BasePlugin<LoadPolusConfig> {
       currentConnections: lobby.getConnections().length,
     });
 
-    this.redis.hmset(`loadpolus.node.${this.getNodeName()}`, {
+    this.redis.hmset(`loadpolus.node.${this.nodeName}`, {
       currentConnections: this.server.getConnections().size,
     });
   }
@@ -110,26 +148,17 @@ export default class extends BasePlugin<LoadPolusConfig> {
     });
   }
 
-  private getNodeName(): string {
-    return this.config?.nodeName ?? os.hostname();
+  private async setNodeName(): Promise<void> {
+    this.nodeName = process.env.NP_NODE_HOSTNAME?.trim()
+                 ?? this.config?.nodeName
+                 ?? (isInDocker() ? await getDropletName() : undefined)
+                 ?? this.nodeName;
   }
 
-  private setPublicIp(): void {
-    childProcess.execFile("/sbin/ip", ["route"], (_error, stdout, _stderr) => {
-      let ip: string | undefined;
-
-      if (stdout.length > 0) {
-        const output = stdout;
-        const match = output.match(/default via ((?:[0-9]{1,3}\.){3}[0-9]{1,3}) dev eth0/);
-
-        if (Array.isArray(match) && match.length >= 2) {
-          ip = match[1];
-        }
-      }
-
-      this.publicIp = process.env.NP_DROPLET_ADDRESS?.trim()
-                   ?? this.config?.publicIp
-                   ?? (isInDocker() ? ip : undefined);
-    });
+  private async setNodeAddress(): Promise<void> {
+    this.nodeAddress = process.env.NP_DROPLET_ADDRESS?.trim()
+                 ?? this.config?.publicIp
+                 ?? (isInDocker() ? await getDropletAddress() : undefined)
+                 ?? this.nodeAddress;
   }
 }
