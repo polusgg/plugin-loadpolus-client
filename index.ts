@@ -1,10 +1,15 @@
+import { UserResponseStructure } from "@polusgg/module-polusgg-auth-api/src/types/userResponseStructure";
+import { EnumValue } from "@polusgg/plugin-polusgg-api/src/packets/root/setGameOption";
 import { GameState, Language, Level } from "@nodepolus/framework/src/types/enums";
+import { ServiceType } from "@polusgg/plugin-polusgg-api/src/types/enums";
+import { Services } from "@polusgg/plugin-polusgg-api/src/services";
 import { LobbyInstance } from "@nodepolus/framework/src/api/lobby";
 import { BasePlugin } from "@nodepolus/framework/src/api/plugin";
 import { readFileSync } from "fs";
 import Redis from "ioredis";
 import got from "got";
 import os from "os";
+import { DisconnectReason } from "@nodepolus/framework/src/types";
 
 const isInDocker = (): boolean => {
   const platform = os.platform();
@@ -38,6 +43,7 @@ type LoadPolusConfig = {
   nodeName?: string;
   publicIp?: string;
   redis?: Redis.RedisOptions;
+  creator: boolean;
 };
 
 export default class extends BasePlugin<LoadPolusConfig> {
@@ -46,6 +52,7 @@ export default class extends BasePlugin<LoadPolusConfig> {
   private registered = false;
   private nodeName = os.hostname();
   private nodeAddress = this.server.getDefaultLobbyAddress();
+  private readonly gameOptionsService = Services.get(ServiceType.GameOptions);
 
   constructor(config: LoadPolusConfig) {
     super({
@@ -59,6 +66,7 @@ export default class extends BasePlugin<LoadPolusConfig> {
     config.redis.host = process.env.NP_REDIS_HOST?.trim() ?? config.redis.host ?? "127.0.0.1";
     config.redis.port = Number.isInteger(redisPort) ? redisPort : config.redis.port ?? 6379;
     config.redis.password = process.env.NP_REDIS_PASSWORD?.trim() ?? undefined;
+    config.creator = process.env.NP_IS_CREATOR_SERVER?.trim() === "true";
 
     if (config.redis.host.startsWith("rediss://")) {
       config.redis.host = config.redis.host.substr("rediss://".length);
@@ -81,14 +89,14 @@ export default class extends BasePlugin<LoadPolusConfig> {
       await this.setNodeAddress();
 
       this.redis.sadd("loadpolus.nodes", this.nodeName);
-      this.redis.hmset(
-        `loadpolus.node.${this.nodeName}`,
-        "maintenance", "false",
-        "host", this.nodeAddress,
-        "port", `${this.server.getDefaultLobbyPort()}`,
-        "currentConnections", "0",
-        "maxConnections", `${this.server.getMaxLobbies() * this.server.getMaxPlayersPerLobby()}`,
-      );
+      this.redis.hmset(`loadpolus.node.${this.nodeName}`, {
+        maintenance: "false",
+        host: this.nodeAddress,
+        port: `${this.server.getDefaultLobbyPort()}`,
+        currentConnections: "0",
+        maxConnections: `${this.server.getMaxLobbies() * this.server.getMaxPlayersPerLobby()}`,
+        creator: this.config?.creator ? "true" : "false",
+      });
 
       this.registerEvents();
     });
@@ -113,11 +121,20 @@ export default class extends BasePlugin<LoadPolusConfig> {
         currentPlayers: 0,
         maxPlayers: options.getMaxPlayers(),
         gameState: GameState[lobby.getGameState()],
-        gamemode: lobby.getMeta<string>("gamemode"),
+        gamemode: "<unknown>",
         "public": lobby.isPublic() ? "true" : "false",
+        creator: this.config?.creator ? "true" : "false",
       });
 
       this.redis.sadd(`loadpolus.node.${this.nodeName}.lobbies`, lobby.getCode());
+
+      const customGameOptions = this.gameOptionsService.getGameOptions<{ gamemode: EnumValue }>(lobby);
+
+      customGameOptions.on("option.gamemode.changed", option => {
+        this.redis.hmset(`loadpolus.lobby.${lobby.getCode()}`, {
+          gamemode: option.getValue().options[option.getValue().index],
+        });
+      });
     });
 
     this.server.on("server.lobby.destroyed", event => {
@@ -140,6 +157,28 @@ export default class extends BasePlugin<LoadPolusConfig> {
         "public": event.isPublic() ? "true" : "false",
       });
     });
+
+    this.server.on("lobby.options.updated", event => {
+      const lobby = event.getLobby();
+      const options = lobby.getOptions();
+
+      this.redis.hmset(`loadpolus.lobby.${lobby.getCode()}`, {
+        level: Level[options.getLevels()[0]],
+        impostorCount: options.getImpostorCount(),
+        language: Language[options.getLanguages()[0]],
+      });
+    });
+
+    if (this.config?.creator) {
+      this.server.on("server.lobby.join", event => {
+        const connection = event.getConnection();
+
+        if (connection.getMeta<UserResponseStructure>("pgg.auth.self").perks.indexOf("server.access.creator") > -1) {
+          event.cancel();
+          event.setDisconnectReason(DisconnectReason.custom("fuck off you arent a streamer"));
+        }
+      });
+    }
   }
 
   private updateCurrentPlayers(lobby: LobbyInstance): void {
