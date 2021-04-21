@@ -175,7 +175,7 @@ export default class extends BasePlugin<LoadPolusConfig> {
 
         if (connection.getMeta<UserResponseStructure>("pgg.auth.self").perks.indexOf("server.access.creator") > -1) {
           event.cancel();
-          event.setDisconnectReason(DisconnectReason.custom("fuck off you arent a streamer"));
+          event.setDisconnectReason(DisconnectReason.custom("You don't have permission to join this lobby."));
         }
       });
     }
