@@ -88,7 +88,12 @@ export default class extends BasePlugin<LoadPolusConfig> {
       await this.setNodeName();
       await this.setNodeAddress();
 
-      this.redis.sadd("loadpolus.nodes", this.nodeName);
+      if (this.config?.creator) {
+        this.redis.sadd("loadpolus.nodes.creator", this.nodeName);
+      } else {
+        this.redis.sadd("loadpolus.nodes", this.nodeName);
+      }
+
       this.redis.hmset(`loadpolus.node.${this.nodeName}`, {
         maintenance: "false",
         host: this.nodeAddress,
@@ -179,6 +184,25 @@ export default class extends BasePlugin<LoadPolusConfig> {
         }
       });
     }
+
+    this.server.on("server.close", () => {
+      const lobbies = this.server.getLobbies();
+
+      for (let i = 0; i < lobbies.length; i++) {
+        const lobby = lobbies[i];
+
+        this.redis.del(`loadpolus.lobby.${lobby.getCode()}`);
+      }
+
+      if (this.config?.creator) {
+        this.redis.srem("loadpolus.nodes.creator", this.nodeName);
+      } else {
+        this.redis.srem("loadpolus.nodes", this.nodeName);
+      }
+
+      this.redis.del(`loadpolus.node.${this.nodeName}.lobbies`);
+      this.redis.del(`loadpolus.node.${this.nodeName}`);
+    });
   }
 
   private updateCurrentPlayers(lobby: LobbyInstance): void {
