@@ -24,8 +24,8 @@
   },
   "dependencies": {
     "@nodepolus/framework": "latest",
+    "@polusgg/module-polusgg-auth-api": "latest",
     "@polusgg/plugin-polusgg-api": "latest",
-    "@polusgg/plugin-polusgg-auth": "latest",
     "got": "^11.8.2",
     "ioredis": "^4.22.0"
   }
