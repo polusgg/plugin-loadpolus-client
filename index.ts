@@ -40,21 +40,35 @@ const getDropletName = async (): Promise<string | undefined> => getMeta("hostnam
 const getDropletAddress = async (): Promise<string | undefined> => getMeta("interfaces/public/0/ipv4/address");
 
 type LoadPolusConfig = {
-  nodeName?: string;
-  publicIp?: string;
-  redis?: Redis.RedisOptions;
+  nodeName: string;
+  publicIp: string;
+  redis: Redis.RedisOptions;
+  type: string;
   creator: boolean;
 };
 
-export default class extends BasePlugin<LoadPolusConfig> {
+enum NotificationType {
+  SystemAlert = "systemAlert",
+}
+
+type SystemAlert = {
+  type: NotificationType.SystemAlert;
+  contents: string;
+};
+
+// NOTE: add shit to this union if/when we add more notification types
+type Notification = SystemAlert;
+
+export default class extends BasePlugin<Partial<LoadPolusConfig>> {
   private readonly redis: Redis.Redis;
 
   private registered = false;
   private nodeName = os.hostname();
   private nodeAddress = this.server.getDefaultLobbyAddress();
   private readonly gameOptionsService = Services.get(ServiceType.GameOptions);
+  private readonly notificationsService = Services.get(ServiceType.Notification);
 
-  constructor(config: LoadPolusConfig) {
+  constructor(config: Partial<LoadPolusConfig>) {
     super({
       name: "LoadPolus",
       version: [1, 0, 0],
@@ -66,7 +80,7 @@ export default class extends BasePlugin<LoadPolusConfig> {
     config.redis.host = process.env.NP_REDIS_HOST?.trim() ?? config.redis.host ?? "127.0.0.1";
     config.redis.port = Number.isInteger(redisPort) ? redisPort : config.redis.port ?? 6379;
     config.redis.password = process.env.NP_REDIS_PASSWORD?.trim() ?? undefined;
-    config.creator = process.env.NP_IS_CREATOR_SERVER?.trim() === "true";
+    config.type = process.env.NP_IS_CREATOR_SERVER?.trim();
 
     if (config.redis.host.startsWith("rediss://")) {
       config.redis.host = config.redis.host.substr("rediss://".length);
@@ -88,8 +102,8 @@ export default class extends BasePlugin<LoadPolusConfig> {
       await this.setNodeName();
       await this.setNodeAddress();
 
-      if (this.config?.creator) {
-        this.redis.sadd("loadpolus.nodes.creator", this.nodeName);
+      if (this.config?.type) {
+        this.redis.sadd(`loadpolus.nodes.${this.config.type}`, this.nodeName);
       } else {
         this.redis.sadd("loadpolus.nodes", this.nodeName);
       }
@@ -105,6 +119,21 @@ export default class extends BasePlugin<LoadPolusConfig> {
 
       this.registerEvents();
     });
+
+    this.redis.on("message", (channel: string, message: string) => {
+      if (channel !== "loadpolus.notifications") {
+        return;
+      }
+
+      const notification: Notification = JSON.parse(message);
+
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      if (notification.type == NotificationType.SystemAlert) {
+        this.notificationsService.displayNotification(notification.contents);
+      }
+    });
+
+    this.redis.subscribe("loadpolus.notifications");
   }
 
   private registerEvents(): void {

@@ -14,7 +14,7 @@
   },
   "homepage": "https://github.com/polusgg/plugin-loadpolus-client",
   "devDependencies": {
-    "@types/ioredis": "^4.22.0",
+    "@types/ioredis": "^4.26.4",
     "@types/node": "^14.14.22",
     "@typescript-eslint/eslint-plugin": "^4.15.0",
     "@typescript-eslint/parser": "^4.15.0",
