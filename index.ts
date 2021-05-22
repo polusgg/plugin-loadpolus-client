@@ -61,6 +61,7 @@ type Notification = SystemAlert;
 
 export default class extends BasePlugin<Partial<LoadPolusConfig>> {
   private readonly redis: Redis.Redis;
+  private readonly subscriberRedis: Redis.Redis;
 
   private registered = false;
   private nodeName = os.hostname();
@@ -89,6 +90,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     }
 
     this.redis = new Redis(this.config!.redis);
+    this.subscriberRedis = new Redis(this.config!.redis);
 
     this.redis.on("connect", async () => {
       this.getLogger().info(`Redis connected to ${config.redis!.host}:${config.redis!.port}`);
@@ -120,20 +122,23 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
       this.registerEvents();
     });
 
-    this.redis.on("message", (channel: string, message: string) => {
-      if (channel !== "loadpolus.notifications") {
-        return;
-      }
+    this.subscriberRedis.on("connect", () => {
+      this.subscriberRedis.on("message", (channel: string, message: string) => {
+        if (channel !== "loadpolus.notifications") {
+          return;
+        }
 
-      const notification: Notification = JSON.parse(message);
+        const notification: Notification = JSON.parse(message);
 
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      if (notification.type == NotificationType.SystemAlert) {
-        this.notificationsService.displayNotification(notification.contents);
-      }
+        switch (notification.type) {
+          case (NotificationType.SystemAlert): {
+            this.notificationsService.displayNotification(notification.contents);
+          }
+        }
+      });
+
+      this.subscriberRedis.subscribe("loadpolus.notifications");
     });
-
-    this.redis.subscribe("loadpolus.notifications");
   }
 
   private registerEvents(): void {
