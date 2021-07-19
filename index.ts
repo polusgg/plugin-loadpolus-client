@@ -1,3 +1,4 @@
+import { LobbyCode } from "@nodepolus/framework/src/util/lobbyCode";
 import { UserResponseStructure } from "@polusgg/module-polusgg-auth-api/src/types/userResponseStructure";
 import { EnumValue } from "@polusgg/plugin-polusgg-api/src/packets/root/setGameOption";
 import { GameState, Language, Level } from "@nodepolus/framework/src/types/enums";
@@ -47,27 +48,13 @@ type LoadPolusConfig = {
   creator: boolean;
 };
 
-enum NotificationType {
-  SystemAlert = "systemAlert",
-}
-
-type SystemAlert = {
-  type: NotificationType.SystemAlert;
-  contents: string;
-};
-
-// NOTE: add shit to this union if/when we add more notification types
-type Notification = SystemAlert;
-
 export default class extends BasePlugin<Partial<LoadPolusConfig>> {
   private readonly redis: Redis.Redis;
-  private readonly subscriberRedis: Redis.Redis;
 
   private registered = false;
   private nodeName = os.hostname();
   private nodeAddress = this.server.getDefaultLobbyAddress();
   private readonly gameOptionsService = Services.get(ServiceType.GameOptions);
-  private readonly notificationsService = Services.get(ServiceType.Notification);
 
   constructor(config: Partial<LoadPolusConfig>) {
     super({
@@ -90,7 +77,6 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     }
 
     this.redis = new Redis(this.config!.redis);
-    this.subscriberRedis = new Redis(this.config!.redis);
 
     this.redis.on("connect", async () => {
       this.getLogger().info(`Redis connected to ${config.redis!.host}:${config.redis!.port}`);
@@ -121,30 +107,35 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
 
       this.registerEvents();
     });
-
-    this.subscriberRedis.on("connect", () => {
-      this.subscriberRedis.on("message", (channel: string, message: string) => {
-        if (channel !== "loadpolus.notifications") {
-          return;
-        }
-
-        const notification: Notification = JSON.parse(message);
-
-        switch (notification.type) {
-          case (NotificationType.SystemAlert): {
-            this.notificationsService.displayNotification(notification.contents);
-          }
-        }
-      });
-
-      this.subscriberRedis.subscribe("loadpolus.notifications");
-    });
   }
 
   private registerEvents(): void {
     this.server.on("server.close", () => {
       this.redis.srem("loadpolus.nodes", this.nodeName);
       this.redis.del(`loadpolus.node.${this.nodeName}`);
+    });
+
+    this.server.on("server.lobby.creating", async event => {
+      const authData = event.getConnection().getMeta<UserResponseStructure>("pgg.auth.self");
+      let currentCode = authData.settings["lobby.code.custom"] ? authData.settings["lobby.code.custom"] : event.getLobbyCode();
+      let remainingTries = 0;
+
+      while (remainingTries > 0) {
+        const fuck = await this.redis.hgetall(`loadpolus.lobby.${currentCode}`);
+
+        if (Object.keys(fuck).length == 0) {
+          event.setLobbyCode(currentCode);
+          return;
+        }
+
+        currentCode = LobbyCode.generate();
+        remainingTries--;
+      }
+
+      // dream luck
+
+      event.setDisconnectReason(DisconnectReason.custom("dream luck (or the server is full)"));
+      event.cancel();
     });
 
     this.server.on("server.lobby.created", event => {
