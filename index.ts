@@ -44,7 +44,6 @@ type LoadPolusConfig = {
   nodeName: string;
   publicIp: string;
   redis: Redis.RedisOptions;
-  type: string;
   creator: boolean;
 };
 
@@ -55,6 +54,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
   private nodeName = os.hostname();
   private nodeAddress = this.server.getDefaultLobbyAddress();
   private readonly gameOptionsService = Services.get(ServiceType.GameOptions);
+  private readonly serverVersion;
 
   constructor(config: Partial<LoadPolusConfig>) {
     super({
@@ -62,13 +62,17 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
       version: [1, 0, 0],
     }, undefined, config);
 
+    this.serverVersion = this.getServer().getVersion();
+  
+    console.log("npm is doodoo", this.serverVersion);
+    
     const redisPort = parseInt(process.env.NP_REDIS_PORT ?? "", 10);
 
     config.redis ??= {};
     config.redis.host = process.env.NP_REDIS_HOST?.trim() ?? config.redis.host ?? "127.0.0.1";
     config.redis.port = Number.isInteger(redisPort) ? redisPort : config.redis.port ?? 6379;
     config.redis.password = process.env.NP_REDIS_PASSWORD?.trim() ?? undefined;
-    config.type = process.env.NP_IS_CREATOR_SERVER?.trim();
+    //config.type = process.env.NP_IS_CREATOR_SERVER?.trim();
 
     if (config.redis.host.startsWith("rediss://")) {
       config.redis.host = config.redis.host.substr("rediss://".length);
@@ -90,10 +94,12 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
       await this.setNodeName();
       await this.setNodeAddress();
 
-      if (this.config?.type) {
-        this.redis.sadd(`loadpolus.nodes.${this.config.type}`, this.nodeName);
+      if (this.config?.creator) {
+        this.redis.sadd(`loadpolus.nodes.creator`, this.nodeName);
+        this.redis.sadd(`loadpolus.nodes.${this.serverVersion}.creator`, this.nodeName);
       } else {
-        this.redis.sadd("loadpolus.nodes", this.nodeName);
+        this.redis.sadd(`loadpolus.nodes`, this.nodeName);
+        this.redis.sadd(`loadpolus.nodes.${this.serverVersion}`, this.nodeName);
       }
 
       this.redis.hmset(`loadpolus.node.${this.nodeName}`, {
@@ -103,6 +109,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
         currentConnections: "0",
         maxConnections: `${this.server.getMaxLobbies() * this.server.getMaxPlayersPerLobby()}`,
         creator: this.config?.creator ? "true" : "false",
+        serverVersion: this.serverVersion,
       });
 
       this.registerEvents();
@@ -110,15 +117,10 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
   }
 
   private registerEvents(): void {
-    this.server.on("server.close", () => {
-      this.redis.srem("loadpolus.nodes", this.nodeName);
-      this.redis.del(`loadpolus.node.${this.nodeName}`);
-    });
-
     this.server.on("server.lobby.creating", async event => {
       const authData = event.getConnection().getMeta<UserResponseStructure>("pgg.auth.self");
       let currentCode = authData.settings["lobby.code.custom"] ? authData.settings["lobby.code.custom"] : event.getLobbyCode();
-      let remainingTries = 0;
+      let remainingTries = 10;
 
       while (remainingTries > 0) {
         const fuck = await this.redis.hgetall(`loadpolus.lobby.${currentCode}`);
@@ -153,6 +155,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
         gameState: GameState[lobby.getGameState()],
         gamemode: "<unknown>",
         "public": lobby.isPublic() ? "true" : "false",
+        serverVersion: this.serverVersion,
         creator: this.config?.creator ? "true" : "false",
       });
 
@@ -220,9 +223,11 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
       }
 
       if (this.config?.creator) {
-        this.redis.srem("loadpolus.nodes.creator", this.nodeName);
+        this.redis.srem(`loadpolus.nodes.creator`, this.nodeName);
+        this.redis.srem(`loadpolus.nodes.${this.serverVersion}.creator`, this.nodeName);
       } else {
-        this.redis.srem("loadpolus.nodes", this.nodeName);
+        this.redis.srem(`loadpolus.nodes`, this.nodeName);
+        this.redis.srem(`loadpolus.nodes.${this.serverVersion}`, this.nodeName);
       }
 
       this.redis.del(`loadpolus.node.${this.nodeName}.lobbies`);

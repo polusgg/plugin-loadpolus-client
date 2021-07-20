@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@nodepolus/framework": "../nodepolus-framework/",
+    "@polusgg/server-nodepolus": "../server-nodepolus/",
     "@polusgg/module-polusgg-auth-api": "../module-polusgg-auth-api/",
     "@polusgg/plugin-polusgg-api": "../plugin-polusgg-api/",
     "got": "^11.8.2",
