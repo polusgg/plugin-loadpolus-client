@@ -67,11 +67,11 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
   private registered = false;
   private nodeName = os.hostname();
   private nodeAddress = this.server.getDefaultLobbyAddress();
-  private readonly gameOptionsService = Services.get(ServiceType.GameOptions);  
+  private readonly gameOptionsService = Services.get(ServiceType.GameOptions);
   private readonly hudService = Services.get(ServiceType.Hud);
   private readonly serverVersion;
   private readonly subscriberRedis: Redis.Redis;
-  private isShuttingDown: boolean = false;
+  private isShuttingDown = false;
 
   constructor(config: Partial<LoadPolusConfig>) {
     super({
@@ -80,9 +80,9 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     }, undefined, config);
 
     this.serverVersion = this.getServer().getVersion();
-  
+
     console.log("npm is doodoo", this.serverVersion);
-    
+
     const redisPort = parseInt(process.env.NP_REDIS_PORT ?? "", 10);
 
     config.redis ??= {};
@@ -136,42 +136,51 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     this.subscriberRedis.on("connect", () => {
       this.subscriberRedis.on("message", async (channel: string, message: string) => {
         console.log(channel, message);
+
         switch (channel) {
-          case "loadpolus.notifications":
+          case "loadpolus.notifications": {
             const notification: Notification = JSON.parse(message);
-    
+
             switch (notification.type) {
               case (NotificationType.SystemAlert): {
                 this.hudService.displayNotification(notification.contents);
               }
             }
             break;
-          case "loadpolus.lobby.create":
-            const lobbyInfo = JSON.parse(message);
-            const code = lobbyInfo.code;
-            // hugh mongus constructor
-            const newLobby = new Lobby(
-              this.server,
-              this.server.getDefaultLobbyAddress(),
-              this.server.getDefaultLobbyPort(),
-              this.server.getDefaultLobbyStartTimerDuration(),
-              this.server.getDefaultLobbyTimeToJoinUntilClosed(),
-              this.server.getDefaultLobbyTimeToStartUntilClosed(),
-              this.server.shouldHideGhostChat(),
-              undefined,
-              code
-            );
-            newLobby.setMeta({
-              "loadpolus.hostUuids": JSON.parse(lobbyInfo.hostsJson),
-              "loadpolus": true,
-            });
+          }
+          case "loadpolus.lobby.create": {
+            const lobbyInfo = JSON.parse(message) as { type: 1; code: string; hostsJson: string } | { type: 2; code: string };
+
+            if (lobbyInfo.type === 1) {
+              const code = lobbyInfo.code;
+              const newLobby = new Lobby(
+                this.server,
+                this.server.getDefaultLobbyAddress(),
+                this.server.getDefaultLobbyPort(),
+                this.server.getDefaultLobbyStartTimerDuration(),
+                this.server.getDefaultLobbyTimeToJoinUntilClosed(),
+                this.server.getDefaultLobbyTimeToStartUntilClosed(),
+                this.server.shouldHideGhostChat(),
+                undefined,
+                undefined,
+                code,
+              );
+
+              newLobby.setMeta({
+                "loadpolus.hostUuids": JSON.parse(lobbyInfo.hostsJson) as string[],
+                loadpolus: true,
+              });
+            }
             break;
-          case "loadpolus.shutdown":
+          }
+          case "loadpolus.shutdown": {
             const shutdownInfo = JSON.parse(message);
+
             console.log("got shutdown message", shutdownInfo);
 
             if (shutdownInfo.node !== this.nodeName) {
               console.log("skill issue");
+
               return;
             }
 
@@ -181,31 +190,31 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                 // shutdown the server by calling server.close()
                 this.server.close().then(async () => {
                   await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
-                    "type": "shutdown_complete",
-                    "node": this.config?.nodeName,
+                    type: "shutdown_complete",
+                    node: this.config?.nodeName,
                   }));
                   process.exit();
                 });
                 break;
-              
+
               case "immediate":
                 // just kill the server
                 console.log("LoadPolus killing server");
 
                 await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
-                  "type": "shutdown_complete",
-                  "node": this.config?.nodeName,
+                  type: "shutdown_complete",
+                  node: this.config?.nodeName,
                 }));
                 process.kill(process.pid, "SIGKILL");
                 break;
-              
+
               case "graceful_delayed":
                 // wait for all lobbies to be destroyed and then shutdown
                 await this.redis.hmset(`loadpolus.node.${this.nodeName}`, {
-                  "maintenance": "true",
+                  maintenance: "true",
                 });
 
-                this.server.on("server.lobby.creating", (event) => {
+                this.server.on("server.lobby.creating", event => {
                   event.setDisconnectReason(DisconnectReason.custom("This server is shutting down. Please try again."));
                   event.cancel();
                 });
@@ -219,8 +228,8 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                 });
 
                 await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
-                  "type": "shutdown_ack",
-                  "node": this.config?.nodeName,
+                  type: "shutdown_ack",
+                  node: this.config?.nodeName,
                 }));
 
                 console.log("Waiting for all lobbies to end before shutting down");
@@ -230,28 +239,30 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
 
                   this.server.close().then(async () => {
                     await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
-                      "type": "shutdown_complete",
-                      "node": this.config?.nodeName,
+                      type: "shutdown_complete",
+                      node: this.config?.nodeName,
                     }));
 
                     process.exit();
                   });
+
                   return;
                 }
 
-                this.server.on("server.lobby.destroyed", (event) => {
-                  if (this.isShuttingDown) return;
+                this.server.on("server.lobby.destroyed", event => {
+                  if (this.isShuttingDown) { return }
                   // the server hasn't removed the lobby from the list at this point
                   // fuck this
                   console.log("sussy", event.getLobby().getCode());
+
                   if (this.server.getLobbies().length <= 1) {
                     console.log("Lobby count hit 0, shutting down!");
                     this.isShuttingDown = true;
 
                     this.server.close().then(async () => {
                       await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
-                        "type": "shutdown_complete",
-                        "node": this.config?.nodeName,
+                        type: "shutdown_complete",
+                        node: this.config?.nodeName,
                       }));
 
                       process.exit();
@@ -260,6 +271,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                 });
                 break;
             }
+          }
         }
       });
 
@@ -280,6 +292,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
 
         if (Object.keys(fuck).length == 0) {
           event.setLobbyCode(currentCode);
+
           return;
         }
 
@@ -345,16 +358,26 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     this.server.on("player.joined", event => {
       const isLoadpolusLobby = !!event.getLobby().getMeta<boolean | undefined>("loadpolus");
       const hosts = event.getLobby().getMeta<string[] | undefined>("loadpolus.hostUuids");
-      if (hosts == undefined || hosts.length == 0) return;
-      
-      const deezNuts = hosts.indexOf(event.getPlayer().getMeta<UserResponseStructure>("pgg.auth.self").client_id);
 
-      if (deezNuts == -1) {
-        if (event.getPlayer().getConnection()?.isActingHost() && isLoadpolusLobby) {
+      if (hosts == undefined || hosts.length == 0) {
+        if (isLoadpolusLobby && event.getPlayer().getConnection()?.isActingHost()) {
+          event.getPlayer().getConnection()?.syncActingHost(false, true);
         }
+
+        return;
       }
 
-      hosts.splice(deezNuts, 1); // ouch
+      const hostIndex = hosts.indexOf(event.getPlayer().getMeta<UserResponseStructure>("pgg.auth.self").client_id);
+
+      if (hostIndex == -1) {
+        if (isLoadpolusLobby && event.getPlayer().getConnection()?.isActingHost()) {
+          event.getPlayer().getConnection()?.syncActingHost(false, true);
+        }
+
+        return;
+      }
+
+      hosts.splice(hostIndex, 1);
       event.getPlayer().getConnection()?.syncActingHost(true, true);
     });
 
