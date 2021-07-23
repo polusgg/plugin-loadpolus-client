@@ -1,16 +1,18 @@
 import { LobbyCode } from "@nodepolus/framework/src/util/lobbyCode";
 import { UserResponseStructure } from "@polusgg/module-polusgg-auth-api/src/types/userResponseStructure";
 import { EnumValue } from "@polusgg/plugin-polusgg-api/src/packets/root/setGameOption";
-import { GameState, Language, Level } from "@nodepolus/framework/src/types/enums";
+import { GameState, Language, Level, Scene } from "@nodepolus/framework/src/types/enums";
 import { ServiceType } from "@polusgg/plugin-polusgg-api/src/types/enums";
 import { Services } from "@polusgg/plugin-polusgg-api/src/services";
 import { LobbyInstance } from "@nodepolus/framework/src/api/lobby";
 import { BasePlugin } from "@nodepolus/framework/src/api/plugin";
+import { RedirectPacket } from "@nodepolus/framework/src/protocol/packets/root";
 import { readFileSync } from "fs";
 import Redis from "ioredis";
 import got from "got";
 import os from "os";
 import { DisconnectReason } from "@nodepolus/framework/src/types";
+import { Lobby } from "@nodepolus/framework/src/lobby";
 
 const isInDocker = (): boolean => {
   const platform = os.platform();
@@ -47,14 +49,29 @@ type LoadPolusConfig = {
   creator: boolean;
 };
 
+enum NotificationType {
+  SystemAlert = "systemAlert",
+}
+
+type SystemAlert = {
+  type: NotificationType.SystemAlert;
+  contents: string;
+};
+
+// NOTE: add shit to this union if/when we add more notification types
+type Notification = SystemAlert;
+
 export default class extends BasePlugin<Partial<LoadPolusConfig>> {
   private readonly redis: Redis.Redis;
 
   private registered = false;
   private nodeName = os.hostname();
   private nodeAddress = this.server.getDefaultLobbyAddress();
-  private readonly gameOptionsService = Services.get(ServiceType.GameOptions);
+  private readonly gameOptionsService = Services.get(ServiceType.GameOptions);  
+  private readonly hudService = Services.get(ServiceType.Hud);
   private readonly serverVersion;
+  private readonly subscriberRedis: Redis.Redis;
+  private isShuttingDown: boolean = false;
 
   constructor(config: Partial<LoadPolusConfig>) {
     super({
@@ -81,6 +98,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     }
 
     this.redis = new Redis(this.config!.redis);
+    this.subscriberRedis = new Redis(this.config!.redis);
 
     this.redis.on("connect", async () => {
       this.getLogger().info(`Redis connected to ${config.redis!.host}:${config.redis!.port}`);
@@ -113,6 +131,141 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
       });
 
       this.registerEvents();
+    });
+
+    this.subscriberRedis.on("connect", () => {
+      this.subscriberRedis.on("message", async (channel: string, message: string) => {
+        console.log(channel, message);
+        switch (channel) {
+          case "loadpolus.notifications":
+            const notification: Notification = JSON.parse(message);
+    
+            switch (notification.type) {
+              case (NotificationType.SystemAlert): {
+                this.hudService.displayNotification(notification.contents);
+              }
+            }
+            break;
+          case "loadpolus.lobby.create":
+            const lobbyInfo = JSON.parse(message);
+            const code = lobbyInfo.code;
+            // hugh mongus constructor
+            const newLobby = new Lobby(
+              this.server,
+              this.server.getDefaultLobbyAddress(),
+              this.server.getDefaultLobbyPort(),
+              this.server.getDefaultLobbyStartTimerDuration(),
+              this.server.getDefaultLobbyTimeToJoinUntilClosed(),
+              this.server.getDefaultLobbyTimeToStartUntilClosed(),
+              this.server.shouldHideGhostChat(),
+              undefined,
+              code
+            );
+            newLobby.setMeta({
+              "loadpolus.hostUuids": JSON.parse(lobbyInfo.hostsJson),
+              "loadpolus": true,
+            });
+            break;
+          case "loadpolus.shutdown":
+            const shutdownInfo = JSON.parse(message);
+            console.log("got shutdown message", shutdownInfo);
+
+            if (shutdownInfo.node !== this.nodeName) {
+              console.log("skill issue");
+              return;
+            }
+
+            switch (shutdownInfo.type) {
+              case "graceful_immediate":
+                console.log("LoadPolus shutting down server");
+                // shutdown the server by calling server.close()
+                this.server.close().then(async () => {
+                  await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
+                    "type": "shutdown_complete",
+                    "node": this.config?.nodeName,
+                  }));
+                  process.exit();
+                });
+                break;
+              
+              case "immediate":
+                // just kill the server
+                console.log("LoadPolus killing server");
+
+                await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
+                  "type": "shutdown_complete",
+                  "node": this.config?.nodeName,
+                }));
+                process.kill(process.pid, "SIGKILL");
+                break;
+              
+              case "graceful_delayed":
+                // wait for all lobbies to be destroyed and then shutdown
+                await this.redis.hmset(`loadpolus.node.${this.nodeName}`, {
+                  "maintenance": "true",
+                });
+
+                this.server.on("server.lobby.creating", (event) => {
+                  event.setDisconnectReason(DisconnectReason.custom("This server is shutting down. Please try again."));
+                  event.cancel();
+                });
+
+                const masterInfo = await this.redis.hgetall("loadpolus.master.info");
+
+                this.server.on("server.lobby.join", async event => {
+                  if (event.getConnection().getCurrentScene() == Scene.EndGame) {
+                    event.getConnection().sendReliable([new RedirectPacket(masterInfo.host, parseInt(masterInfo.port))]);
+                  }
+                });
+
+                await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
+                  "type": "shutdown_ack",
+                  "node": this.config?.nodeName,
+                }));
+
+                console.log("Waiting for all lobbies to end before shutting down");
+
+                if (this.server.getLobbies().length == 0) {
+                  console.log("Lobby count hit 0, shutting down!");
+
+                  this.server.close().then(async () => {
+                    await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
+                      "type": "shutdown_complete",
+                      "node": this.config?.nodeName,
+                    }));
+
+                    process.exit();
+                  });
+                  return;
+                }
+
+                this.server.on("server.lobby.destroyed", (event) => {
+                  if (this.isShuttingDown) return;
+                  // the server hasn't removed the lobby from the list at this point
+                  // fuck this
+                  console.log("sussy", event.getLobby().getCode());
+                  if (this.server.getLobbies().length <= 1) {
+                    console.log("Lobby count hit 0, shutting down!");
+                    this.isShuttingDown = true;
+
+                    this.server.close().then(async () => {
+                      await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
+                        "type": "shutdown_complete",
+                        "node": this.config?.nodeName,
+                      }));
+
+                      process.exit();
+                    });
+                  }
+                });
+                break;
+            }
+        }
+      });
+
+      this.subscriberRedis.subscribe("loadpolus.notifications");
+      this.subscriberRedis.subscribe("loadpolus.shutdown");
+      this.subscriberRedis.subscribe("loadpolus.lobby.create");
     });
   }
 
@@ -170,6 +323,10 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
       });
     });
 
+    this.server.on("lobby.host.added", event => this.updateHostList(event.getLobby()));
+    this.server.on("lobby.host.migrated", event => this.updateHostList(event.getLobby()));
+    this.server.on("lobby.host.removed", event => this.updateHostList(event.getLobby()));
+
     this.server.on("server.lobby.destroyed", event => {
       const code = event.getLobby().getCode();
 
@@ -184,6 +341,22 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     this.server.on("server.lobby.list", event => { event.cancel() });
     this.server.on("game.started", event => this.updateGameState(event.getGame().getLobby()));
     this.server.on("game.ended", event => this.updateGameState(event.getGame().getLobby()));
+
+    this.server.on("player.joined", event => {
+      const isLoadpolusLobby = !!event.getLobby().getMeta<boolean | undefined>("loadpolus");
+      const hosts = event.getLobby().getMeta<string[] | undefined>("loadpolus.hostUuids");
+      if (hosts == undefined || hosts.length == 0) return;
+      
+      const deezNuts = hosts.indexOf(event.getPlayer().getMeta<UserResponseStructure>("pgg.auth.self").client_id);
+
+      if (deezNuts == -1) {
+        if (event.getPlayer().getConnection()?.isActingHost() && isLoadpolusLobby) {
+        }
+      }
+
+      hosts.splice(deezNuts, 1); // ouch
+      event.getPlayer().getConnection()?.syncActingHost(true, true);
+    });
 
     this.server.on("lobby.privacy.updated", event => {
       this.redis.hmset(`loadpolus.lobby.${event.getLobby().getCode()}`, {
@@ -243,6 +416,20 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
 
     this.redis.hmset(`loadpolus.node.${this.nodeName}`, {
       currentConnections: this.server.getConnections().size,
+    });
+
+    const players = lobby.getConnections().map(connection => connection.getMeta<UserResponseStructure>("pgg.auth.self").client_id);
+
+    this.redis.hmset(`loadpolus.lobby.${lobby.getCode()}`, {
+      playersJson: JSON.stringify(players),
+    });
+  }
+
+  private updateHostList(lobby: LobbyInstance): void {
+    const hosts = lobby.getActingHosts().map(connection => connection.getMeta<UserResponseStructure>("pgg.auth.self").client_id);
+
+    this.redis.hmset(`loadpolus.lobby.${lobby.getCode()}`, {
+      hostsJson: JSON.stringify(hosts),
     });
   }
 
