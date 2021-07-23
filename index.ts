@@ -170,6 +170,11 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                 "loadpolus.hostUuids": JSON.parse(lobbyInfo.hostsJson) as string[],
                 loadpolus: true,
               });
+
+              this.redis.publish("loadpolus.lobby.create", JSON.stringify({
+                type: 2,
+                code: lobbyInfo.code,
+              }));
             }
             break;
           }
@@ -323,6 +328,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
         "public": lobby.isPublic() ? "true" : "false",
         serverVersion: this.serverVersion,
         creator: this.config?.creator ? "true" : "false",
+        transitioning: "false",
       });
 
       this.redis.sadd(`loadpolus.node.${this.nodeName}.lobbies`, lobby.getCode());
