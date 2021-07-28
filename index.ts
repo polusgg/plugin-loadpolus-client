@@ -149,33 +149,43 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
             break;
           }
           case "loadpolus.lobby.create": {
-            const lobbyInfo = JSON.parse(message) as { type: 1; code: string; hostsJson: string } | { type: 2; code: string };
+            const lobbyInfo = JSON.parse(message) as { type: 1; code: string; hostsJson: string; targetNode: string } | { type: 2; code: string; targetNode: string };
 
-            if (lobbyInfo.type === 1) {
-              const code = lobbyInfo.code;
-              const newLobby = new Lobby(
-                this.server,
-                this.server.getDefaultLobbyAddress(),
-                this.server.getDefaultLobbyPort(),
-                this.server.getDefaultLobbyStartTimerDuration(),
-                this.server.getDefaultLobbyTimeToJoinUntilClosed(),
-                this.server.getDefaultLobbyTimeToStartUntilClosed(),
-                this.server.shouldHideGhostChat(),
-                undefined,
-                undefined,
-                code,
-              );
-
-              newLobby.setMeta({
-                "loadpolus.hostUuids": JSON.parse(lobbyInfo.hostsJson) as string[],
-                loadpolus: true,
-              });
-
-              this.redis.publish("loadpolus.lobby.create", JSON.stringify({
-                type: 2,
-                code: lobbyInfo.code,
-              }));
+            if (lobbyInfo.type != 1) {
+              break;
             }
+
+            if (lobbyInfo.targetNode != this.nodeName) {
+              break;
+            }
+
+            const code = lobbyInfo.code;
+            const newLobby = new Lobby(
+              this.server,
+              this.server.getDefaultLobbyAddress(),
+              this.server.getDefaultLobbyPort(),
+              this.server.getDefaultLobbyStartTimerDuration(),
+              this.server.getDefaultLobbyTimeToJoinUntilClosed(),
+              this.server.getDefaultLobbyTimeToStartUntilClosed(),
+              this.server.shouldHideGhostChat(),
+              undefined,
+              undefined,
+              code,
+            );
+
+            newLobby.setMeta({
+              "loadpolus.hostUuids": JSON.parse(lobbyInfo.hostsJson) as string[],
+              loadpolus: true,
+            });
+
+            this.server.addLobby(newLobby);
+
+            this.redis.publish("loadpolus.lobby.create", JSON.stringify({
+              type: 2,
+              code: lobbyInfo.code,
+              targetNode: this.nodeName,
+            }));
+
             break;
           }
           case "loadpolus.shutdown": {
@@ -227,8 +237,23 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                 const masterInfo = await this.redis.hgetall("loadpolus.master.info");
 
                 this.server.on("server.lobby.join", async event => {
+                  console.log("got join", event.getConnection().getCurrentScene());
+
+                  if (event.getLobby() == undefined) {
+                    return;
+                  }
+
                   if (event.getConnection().getCurrentScene() == Scene.EndGame) {
+                    console.log("funny reconnect logic");
+                    await this.redis.hmset(`loadpolus.lobby.${event.getLobbyCode()}`, {
+                      transitioning: "true",
+                    });
+                    console.log("wrote the redis shit");
+                    console.log("sending to", masterInfo.host, masterInfo.port);
                     event.getConnection().sendReliable([new RedirectPacket(masterInfo.host, parseInt(masterInfo.port))]);
+
+                    //@ts-ignore
+                    event.getConnection().flush = (() => {});
                   }
                 });
 
@@ -358,8 +383,17 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     this.server.on("player.kicked", event => this.updateCurrentPlayers(event.getLobby()));
     this.server.on("player.banned", event => this.updateCurrentPlayers(event.getLobby()));
     this.server.on("server.lobby.list", event => { event.cancel() });
-    this.server.on("game.started", event => this.updateGameState(event.getGame().getLobby()));
-    this.server.on("game.ended", event => this.updateGameState(event.getGame().getLobby()));
+    this.server.on("game.started", event => {
+      this.redis.hmset(`loadpolus.lobby.${event.getGame().getLobby().getCode()}`, {
+        gameState: "Started"
+      });
+    });
+    this.server.on("game.ended", event => {
+      if (event.isCancelled()) return;
+      this.redis.hmset(`loadpolus.lobby.${event.getGame().getLobby().getCode()}`, {
+        gameState: "NotStarted"
+      });
+    });
 
     this.server.on("player.joined", event => {
       const isLoadpolusLobby = !!event.getLobby().getMeta<boolean | undefined>("loadpolus");
@@ -459,12 +493,6 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
 
     this.redis.hmset(`loadpolus.lobby.${lobby.getCode()}`, {
       hostsJson: JSON.stringify(hosts),
-    });
-  }
-
-  private updateGameState(lobby: LobbyInstance): void {
-    this.redis.hmset(`loadpolus.lobby.${lobby.getCode()}`, {
-      gameState: GameState[lobby.getGameState()],
     });
   }
 
