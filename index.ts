@@ -13,6 +13,7 @@ import os from "os";
 import { DisconnectReason } from "@nodepolus/framework/src/types";
 import { MarkAssBrownPacket } from "./packets/markAssBrown";
 import { RedirectPacket } from "@nodepolus/framework/src/protocol/packets/root";
+import { PlayerInstance } from "@polusgg/module-polusgg-auth-api/node_modules/@polusgg/plugin-polusgg-api/node_modules/@nodepolus/framework/src/api/player";
 
 const isInDocker = (): boolean => {
   const platform = os.platform();
@@ -461,6 +462,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     this.server.on("server.lobby.destroyed", event => {
       const code = event.getLobby().getCode();
 
+      this.redis.del(`loadpolus.lobbyUuid.${event.getLobby().getMeta<string>("pgg.log.uuid")}`);
       this.redis.del(`loadpolus.lobby.${code}`);
       this.redis.srem(`loadpolus.node.${this.nodeName}.lobbies`, code);
     });
@@ -481,6 +483,11 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
         gameState: "NotStarted"
       });
     });
+
+    this.server.on("player.joined", event => this.handlePlayerJoin(event.getPlayer(), event.getLobby()));
+    this.server.on("player.left", event => this.handlePlayerLeave(event.getPlayer()));
+    this.server.on("player.kicked", event => this.handlePlayerLeave(event.getPlayer()));
+    this.server.on("player.banned", event => this.handlePlayerLeave(event.getPlayer()));
 
     this.server.on("server.lobby.creating", async (event) => {
       if (this.isPendingShutdown) {
@@ -588,6 +595,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
         const lobby = lobbies[i];
 
         this.redis.del(`loadpolus.lobby.${lobby.getCode()}`);
+        this.redis.del(`loadpolus.lobbyUuid.${lobby.getMeta<string>("pgg.log.uuid")}`)
       }
 
       if (this.config?.creator) {
@@ -618,6 +626,27 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     this.redis.hmset(`loadpolus.lobby.${lobby.getCode()}`, {
       playersJson: JSON.stringify(players),
     });
+  }
+
+  private handlePlayerJoin(player: PlayerInstance, lobby: LobbyInstance) {
+    this.redis.set(
+      `loadpolus.userUuid.${player.getSafeConnection().getMeta<UserResponseStructure>("pgg.auth.self").client_id}`,
+      lobby.getCode(),
+    ).then(() => {
+      this.redis.expire(
+        `loadpolus.userUuid.${player.getSafeConnection().getMeta<UserResponseStructure>("pgg.auth.self").client_id}`,
+        10800,
+      );
+    });
+
+    this.redis.set(
+      `loadpolus.lobbyUuid.${lobby.getMeta<string>("pgg.log.uuid")}`,
+      lobby.getCode(),
+    );
+  }
+
+  private handlePlayerLeave(player: PlayerInstance) {
+    this.redis.del(`loadpolus.userUuid.${player.getMeta<UserResponseStructure>("pgg.auth.self").client_id}`);
   }
 
   private updateHostList(lobby: LobbyInstance): void {
