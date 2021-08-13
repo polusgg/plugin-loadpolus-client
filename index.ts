@@ -6,13 +6,13 @@ import { ServiceType } from "@polusgg/plugin-polusgg-api/src/types/enums";
 import { Services } from "@polusgg/plugin-polusgg-api/src/services";
 import { LobbyInstance } from "@nodepolus/framework/src/api/lobby";
 import { BasePlugin } from "@nodepolus/framework/src/api/plugin";
-import { RedirectPacket } from "@nodepolus/framework/src/protocol/packets/root";
 import { readFileSync } from "fs";
 import Redis from "ioredis";
 import got from "got";
 import os from "os";
 import { DisconnectReason } from "@nodepolus/framework/src/types";
-import { Lobby } from "@nodepolus/framework/src/lobby";
+import { MarkAssBrownPacket } from "./packets/markAssBrown";
+import { RedirectPacket } from "@nodepolus/framework/src/protocol/packets/root";
 
 const isInDocker = (): boolean => {
   const platform = os.platform();
@@ -72,7 +72,10 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
   private readonly serverVersion;
   private readonly subscriberRedis: Redis.Redis;
   private isShuttingDown = false;
-
+  private isPendingShutdown = false;
+  private readonly gamecodePromiseAcceptMap = new Map<string, (reason?: any) => void>();
+  private readonly selectedNewNodeMap = new Map<string, Record<string, string>>();
+  
   constructor(config: Partial<LoadPolusConfig>) {
     super({
       name: "LoadPolus",
@@ -148,43 +151,29 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
             }
             break;
           }
-          case "loadpolus.lobby.create": {
-            const lobbyInfo = JSON.parse(message) as { type: 1; code: string; hostsJson: string; targetNode: string } | { type: 2; code: string; targetNode: string };
+          case "loadpolus.transferred": {
+            const shit = JSON.parse(message);
+            const funnyLobbyCode = shit.lobbyCode;
+            const userIdWhoJoinedTheFuckingdfsjf = shit.userId;
 
-            if (lobbyInfo.type != 1) {
-              break;
+            if (funnyLobbyCode === undefined) {
+              return;
             }
 
-            if (lobbyInfo.targetNode != this.nodeName) {
-              break;
+            if (userIdWhoJoinedTheFuckingdfsjf === undefined) {
+              return;
             }
 
-            const code = lobbyInfo.code;
-            const newLobby = new Lobby(
-              this.server,
-              this.server.getDefaultLobbyAddress(),
-              this.server.getDefaultLobbyPort(),
-              this.server.getDefaultLobbyStartTimerDuration(),
-              this.server.getDefaultLobbyTimeToJoinUntilClosed(),
-              this.server.getDefaultLobbyTimeToStartUntilClosed(),
-              this.server.shouldHideGhostChat(),
-              undefined,
-              undefined,
-              code,
-            );
+            const acceptFunction = this.gamecodePromiseAcceptMap.get(`${funnyLobbyCode}_${userIdWhoJoinedTheFuckingdfsjf}`);
 
-            newLobby.setMeta({
-              "loadpolus.hostUuids": JSON.parse(lobbyInfo.hostsJson) as string[],
-              loadpolus: true,
-            });
+            if (acceptFunction === undefined) {
+              console.log("WHY IS IT UNDEFINED IM AGOING INSANE");
+              
+              return;
+            }
 
-            this.server.addLobby(newLobby);
-
-            this.redis.publish("loadpolus.lobby.create", JSON.stringify({
-              type: 2,
-              code: lobbyInfo.code,
-              targetNode: this.nodeName,
-            }));
+            acceptFunction();
+            console.log("called the fucking fnction for", funnyLobbyCode, userIdWhoJoinedTheFuckingdfsjf);
 
             break;
           }
@@ -225,6 +214,11 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
 
               case "graceful_delayed":
                 // wait for all lobbies to be destroyed and then shutdown
+                this.isPendingShutdown = true;
+
+                //@ts-ignore
+                this.server.isShuttingDown = true;
+
                 await this.redis.hmset(`loadpolus.node.${this.nodeName}`, {
                   maintenance: "true",
                 });
@@ -234,69 +228,162 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                   event.cancel();
                 });
 
-                const masterInfo = await this.redis.hgetall("loadpolus.master.info");
-
-                this.server.on("server.lobby.join", async event => {
-                  console.log("got join", event.getConnection().getCurrentScene());
-
-                  if (event.getLobby() == undefined) {
-                    return;
-                  }
-
-                  if (event.getConnection().getCurrentScene() == Scene.EndGame) {
-                    console.log("funny reconnect logic");
-                    await this.redis.hmset(`loadpolus.lobby.${event.getLobbyCode()}`, {
-                      transitioning: "true",
-                    });
-                    console.log("wrote the redis shit");
-                    console.log("sending to", masterInfo.host, masterInfo.port);
-                    event.getConnection().sendReliable([new RedirectPacket(masterInfo.host, parseInt(masterInfo.port))]);
-
-                    //@ts-ignore
-                    event.getConnection().flush = (() => {});
-                  }
-                });
-
+                
                 await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
                   type: "shutdown_ack",
                   node: this.config?.nodeName,
                 }));
-
+                
                 console.log("Waiting for all lobbies to end before shutting down");
-
+                
                 if (this.server.getLobbies().length == 0) {
                   console.log("Lobby count hit 0, shutting down!");
-
+                  
                   this.server.close().then(async () => {
                     await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
                       type: "shutdown_complete",
                       node: this.config?.nodeName,
                     }));
-
+                    
                     process.exit();
                   });
-
+                  
                   return;
                 }
-
+                
                 this.server.on("server.lobby.destroyed", event => {
                   if (this.isShuttingDown) { return }
                   // the server hasn't removed the lobby from the list at this point
                   // fuck this
                   console.log("sussy", event.getLobby().getCode());
-
+                  
                   if (this.server.getLobbies().length <= 1) {
                     console.log("Lobby count hit 0, shutting down!");
                     this.isShuttingDown = true;
-
+                    
                     this.server.close().then(async () => {
                       await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
                         type: "shutdown_complete",
                         node: this.config?.nodeName,
                       }));
-
+                      
                       process.exit();
                     });
+                  }
+
+                });
+                this.server.on("game.ended", async event => {
+                  console.log("the got damn");
+                  (async () => {
+                    console.log("the motherfuckin uhhh");
+                    const creator = event.getGame().getLobby().getCreator();
+                    const lobby = event.getGame().getLobby();
+
+                    if (creator === undefined) {
+                      console.log("panic!!!!!!!!! there's no creator for this lobby??");
+                      lobby.close();
+                      event.cancel();
+                      return;
+                    }
+
+                    const targetVersion = await this.redis.hget("loadpolus.config", "targetVersion");
+                    if (targetVersion === null) {
+                      console.log("panic!!!!!!!!! loadpolus.config[targetVersion] is undefined??");
+                      lobby.close();
+                      event.cancel();
+                      return;
+                    }
+
+                    const userData = creator.getMeta<UserResponseStructure>("pgg.auth.self");
+                    const serverKey = `loadpolus.nodes.${targetVersion}${userData.perks.includes("server.access.creator") ? ".creator" : ""}`;
+                    const newServer = await this.selectServer(serverKey);
+
+                    const connections = lobby.getConnections();
+
+                    if (newServer == undefined) {
+                      for (let i=0; i<connections.length; i++) {
+                        const connection = connections[i];
+
+                        connection.disconnect(DisconnectReason.custom("The server you were previously on has shut down for maintenance. Please try again later."));
+                      }
+
+                      return;
+                    }
+
+                    this.selectedNewNodeMap.set(lobby.getCode(), newServer);
+
+                    // fuck this fuck this fuck this fuck this fuck this fuck this fuck this fuck this fuck this fuck this fuck th
+                    
+                    const hosts = lobby.getActingHosts();
+                    const nonHosts = lobby.getConnections().filter(connection => connection.isActingHost());
+                    const possibleHosts = hosts.concat(nonHosts);
+
+                    for (let i=0; i<possibleHosts.length; i++) {
+                      const currentConnection = possibleHosts[i];
+                      console.log("i hate", currentConnection.getName());
+
+                      let acceptFunction;
+
+                      const funnyPromise = new Promise((accept, reject) => {
+                        acceptFunction = accept;
+                        setTimeout(() => {
+                          console.log("epic timeout (hopefully the promise was actually resolved)");
+                          reject("epic timeout fail");
+                        }, 6000);
+                      });
+                      
+                      this.gamecodePromiseAcceptMap.set(`${lobby.getCode()}_${userData.client_id}`, acceptFunction);
+                      console.log("added promise to the funny map");
+
+
+                      await this.redis.set(`loadpolus.transfer.user.${userData.client_id}`, lobby.getCode());
+                      await this.redis.expire(`loadpolus.transfer.user.${userData.client_id}`, 180);
+
+                      await currentConnection.sendReliable([new MarkAssBrownPacket(newServer!.host, parseInt(newServer!.port))]);
+                      console.log("racism");
+
+                      try {
+                        await funnyPromise;
+
+                        console.log("EPIC WIN HOLY SHIT");
+                        return;
+                      } catch (error) {
+                        console.log("fuck (timed out before the funny happened)");
+                      } finally {
+                        console.log("yo mama (the epic final(ly))");
+                        this.gamecodePromiseAcceptMap.delete(`${lobby.getCode()}_${userData.client_id}`);
+                        console.log("moving onto the next one...");
+                        continue;
+                      }
+                    }
+
+                    console.log("WHAT THE FUCK (x2) WE SOMEHOW FAILED ALL HOSTS");
+                  })();
+                });
+
+                this.server.on("server.lobby.join", async event => {
+                  console.log("got join", event.getConnection().getCurrentScene());
+
+                  const lobby = event.getLobby();
+
+                  if (lobby == undefined) {
+                    return;
+                  }
+
+                  if (event.getConnection().getCurrentScene() == Scene.EndGame) {
+                    console.log("funny reconnect logic");
+
+                    const newServer = this.selectedNewNodeMap.get(lobby.getCode());
+
+                    if (newServer === undefined) {
+                      event.setDisconnectReason(DisconnectReason.custom("Tried to send you to the new server but not present in selectedNewNodeMap?!"));
+                      event.cancel();
+                      
+                      return;
+                    }
+
+                    event.getConnection().sendReliable([new RedirectPacket(newServer.host, parseInt(newServer.port))]);
+                    console.log("sent player to new server on", newServer.host, newServer.port);
                   }
                 });
                 break;
@@ -307,7 +394,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
 
       this.subscriberRedis.subscribe("loadpolus.notifications");
       this.subscriberRedis.subscribe("loadpolus.shutdown");
-      this.subscriberRedis.subscribe("loadpolus.lobby.create");
+      this.subscriberRedis.subscribe("loadpolus.transferred");
     });
   }
 
@@ -393,6 +480,51 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
       this.redis.hmset(`loadpolus.lobby.${event.getGame().getLobby().getCode()}`, {
         gameState: "NotStarted"
       });
+    });
+
+    this.server.on("server.lobby.creating", async (event) => {
+      if (this.isPendingShutdown) {
+        console.log("server.lobby.creating but the server is shutting down >:(((((((");
+
+        return;
+      }
+
+      if (!event.isMigrating()) {
+        return;
+      }
+
+      console.log("got migrating lobby");
+    
+      const userData = event.getConnection().getMeta<UserResponseStructure>("pgg.auth.self");
+      const oldLobbyCode = await this.redis.get(`loadpolus.transfer.user.${userData.client_id}`);
+
+      if (oldLobbyCode === null) {
+        console.log("no old lobby code?!?!?");
+
+        event.setDisconnectReason(DisconnectReason.custom("Unable to find the previous lobby you were in. Please try again."));
+        event.cancel();
+
+        return;
+      }
+
+      const possibleLobbyData = await this.redis.hgetall(`loadpolus.lobby.${oldLobbyCode}`);
+
+      if (Object.keys(possibleLobbyData).length > 0) {
+        console.log("previous lobby already exists?!?!!");
+
+        event.setDisconnectReason(DisconnectReason.custom("Unable to transfer you to a new server. Please try again."));
+        event.cancel();
+
+        return;
+      }
+
+      console.log("welcome to hell, the lobby code is", oldLobbyCode);
+      event.setLobbyCode(oldLobbyCode);
+
+      await this.redis.publish("loadpolus.transferred", JSON.stringify({
+        lobbyCode: oldLobbyCode,
+        userId: userData.client_id,
+      }));
     });
 
     this.server.on("player.joined", event => {
@@ -508,5 +640,78 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                  ?? this.config?.publicIp
                  ?? (isInDocker() ? await getDropletAddress() : undefined)
                  ?? this.nodeAddress;
+  }
+
+  // fucking lkgdjskdjgsd;gjsgdgdgg;ajsd;lkj3efasj
+
+  private async fetchNodes(nodesKey: string = "loadpolus.nodes"): Promise<Map<string, Record<string, string>>> {
+    let availableNodes: string[];
+
+    try {
+      availableNodes = await this.redis.smembers(nodesKey);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    const nodeData = new Map<string, Record<string, string>>();
+    const nodePipeline = this.redis.pipeline();
+
+    for (let i = 0; i < availableNodes.length; i++) {
+      const node = availableNodes[i];
+
+      nodePipeline.hgetall(`loadpolus.node.${node}`);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let nodeResults: [Error | null, any][];
+
+    try {
+      nodeResults = await nodePipeline.exec();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    for (let i = 0; i < nodeResults.length; i++) {
+      const result = nodeResults[i];
+
+      if (result[0] !== null) {
+        continue;
+      }
+
+      result[1].nodeName = availableNodes[i];
+
+      nodeData.set(availableNodes[i], result[1]);
+    }
+
+    return nodeData;
+  }
+
+  private async selectServer(nodes: string): Promise<Record<string, string> | undefined> {
+    const nodeData: Map<string, Record<string, string>> = await this.fetchNodes(nodes);
+    let best: string | undefined;
+
+    for (const node of nodeData) {
+      if (node[1].maintenance === "true") {
+        continue;
+      }
+
+      const players = parseInt(node[1].currentConnections, 10);
+
+      if (players >= parseInt(node[1].maxConnections, 10)) {
+        continue;
+      }
+
+      if (best === undefined) {
+        best = node[0];
+
+        continue;
+      }
+
+      if (players < parseInt(nodeData.get(best!)!.currentConnections, 10)) {
+        best = node[0];
+      }
+    }
+
+    return best ? nodeData.get(best) : undefined;
   }
 }
