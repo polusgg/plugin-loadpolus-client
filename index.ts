@@ -13,7 +13,7 @@ import os from "os";
 import { DisconnectReason } from "@nodepolus/framework/src/types";
 import { MarkAssBrownPacket } from "./packets/markAssBrown";
 import { RedirectPacket } from "@nodepolus/framework/src/protocol/packets/root";
-import { PlayerInstance } from "@polusgg/module-polusgg-auth-api/node_modules/@polusgg/plugin-polusgg-api/node_modules/@nodepolus/framework/src/api/player";
+import { PlayerInstance } from "@nodepolus/framework/src/api/player";
 
 const isInDocker = (): boolean => {
   const platform = os.platform();
@@ -76,7 +76,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
   private isPendingShutdown = false;
   private readonly gamecodePromiseAcceptMap = new Map<string, (reason?: any) => void>();
   private readonly selectedNewNodeMap = new Map<string, Record<string, string>>();
-  
+
   constructor(config: Partial<LoadPolusConfig>) {
     super({
       name: "LoadPolus",
@@ -169,7 +169,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
 
             if (acceptFunction === undefined) {
               console.log("WHY IS IT UNDEFINED IM AGOING INSANE");
-              
+
               return;
             }
 
@@ -229,45 +229,45 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                   event.cancel();
                 });
 
-                
+
                 await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
                   type: "shutdown_ack",
                   node: this.config?.nodeName,
                 }));
-                
+
                 console.log("Waiting for all lobbies to end before shutting down");
-                
+
                 if (this.server.getLobbies().length == 0) {
                   console.log("Lobby count hit 0, shutting down!");
-                  
+
                   this.server.close().then(async () => {
                     await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
                       type: "shutdown_complete",
                       node: this.config?.nodeName,
                     }));
-                    
+
                     process.exit();
                   });
-                  
+
                   return;
                 }
-                
+
                 this.server.on("server.lobby.destroyed", event => {
                   if (this.isShuttingDown) { return }
                   // the server hasn't removed the lobby from the list at this point
                   // fuck this
                   console.log("sussy", event.getLobby().getCode());
-                  
+
                   if (this.server.getLobbies().length <= 1) {
                     console.log("Lobby count hit 0, shutting down!");
                     this.isShuttingDown = true;
-                    
+
                     this.server.close().then(async () => {
                       await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
                         type: "shutdown_complete",
                         node: this.config?.nodeName,
                       }));
-                      
+
                       process.exit();
                     });
                   }
@@ -314,7 +314,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                     this.selectedNewNodeMap.set(lobby.getCode(), newServer);
 
                     // fuck this fuck this fuck this fuck this fuck this fuck this fuck this fuck this fuck this fuck this fuck th
-                    
+
                     const hosts = lobby.getActingHosts();
                     const nonHosts = lobby.getConnections().filter(connection => connection.isActingHost());
                     const possibleHosts = hosts.concat(nonHosts);
@@ -332,7 +332,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                           reject("epic timeout fail");
                         }, 6000);
                       });
-                      
+
                       this.gamecodePromiseAcceptMap.set(`${lobby.getCode()}_${userData.client_id}`, acceptFunction);
                       console.log("added promise to the funny map");
 
@@ -379,7 +379,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                     if (newServer === undefined) {
                       event.setDisconnectReason(DisconnectReason.custom("Tried to send you to the new server but not present in selectedNewNodeMap?!"));
                       event.cancel();
-                      
+
                       return;
                     }
 
@@ -501,7 +501,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
       }
 
       console.log("got migrating lobby");
-    
+
       const userData = event.getConnection().getMeta<UserResponseStructure>("pgg.auth.self");
       const oldLobbyCode = await this.redis.get(`loadpolus.transfer.user.${userData.client_id}`);
 

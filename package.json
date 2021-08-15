@@ -23,10 +23,10 @@
     "typescript": "^4.1.3"
   },
   "dependencies": {
-    "@nodepolus/framework": "../nodepolus-framework/",
-    "@polusgg/module-polusgg-auth-api": "file:../module-polusgg-auth-api",
-    "@polusgg/plugin-polusgg-api": "../plugin-polusgg-api",
-    "@polusgg/plugin-polusgg-auth": "../plugin-polusgg-auth",
+    "@nodepolus/framework": "latest",
+    "@polusgg/module-polusgg-auth-api": "latest",
+    "@polusgg/plugin-polusgg-api": "latest",
+    "@polusgg/plugin-polusgg-auth": "latest",
     "got": "^11.8.2",
     "ioredis": "^4.22.0"
   }
