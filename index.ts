@@ -229,7 +229,6 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                   event.cancel();
                 });
 
-
                 await this.redis.publish("loadpolus.shutdown.alert", JSON.stringify({
                   type: "shutdown_ack",
                   node: this.config?.nodeName,
@@ -271,12 +270,12 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                       process.exit();
                     });
                   }
-
                 });
-                this.server.on("game.ended", async event => {
+                this.server.on("game.ended", event => {
                   console.log("the got damn");
-                  (async () => {
+                  (async (): Promise<void> => {
                     console.log("the motherfuckin uhhh");
+
                     const creator = event.getGame().getLobby().getCreator();
                     const lobby = event.getGame().getLobby();
 
@@ -284,14 +283,17 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                       console.log("panic!!!!!!!!! there's no creator for this lobby??");
                       lobby.close();
                       event.cancel();
+
                       return;
                     }
 
                     const targetVersion = await this.redis.hget("loadpolus.config", "targetVersion");
+
                     if (targetVersion === null) {
                       console.log("panic!!!!!!!!! loadpolus.config[targetVersion] is undefined??");
                       lobby.close();
                       event.cancel();
+
                       return;
                     }
 
@@ -302,7 +304,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                     const connections = lobby.getConnections();
 
                     if (newServer == undefined) {
-                      for (let i=0; i<connections.length; i++) {
+                      for (let i = 0; i < connections.length; i++) {
                         const connection = connections[i];
 
                         connection.disconnect(DisconnectReason.custom("The server you were previously on has shut down for maintenance. Please try again later."));
@@ -319,8 +321,9 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                     const nonHosts = lobby.getConnections().filter(connection => connection.isActingHost());
                     const possibleHosts = hosts.concat(nonHosts);
 
-                    for (let i=0; i<possibleHosts.length; i++) {
+                    for (let i = 0; i < possibleHosts.length; i++) {
                       const currentConnection = possibleHosts[i];
+
                       console.log("i hate", currentConnection.getName());
 
                       let acceptFunction;
@@ -329,24 +332,24 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                         acceptFunction = accept;
                         setTimeout(() => {
                           console.log("epic timeout (hopefully the promise was actually resolved)");
-                          reject("epic timeout fail");
+                          reject(new Error("epic timeout fail"));
                         }, 6000);
                       });
 
                       this.gamecodePromiseAcceptMap.set(`${lobby.getCode()}_${userData.client_id}`, acceptFunction);
                       console.log("added promise to the funny map");
 
-
                       await this.redis.set(`loadpolus.transfer.user.${userData.client_id}`, lobby.getCode());
                       await this.redis.expire(`loadpolus.transfer.user.${userData.client_id}`, 180);
 
-                      await currentConnection.sendReliable([new MarkAssBrownPacket(newServer!.host, parseInt(newServer!.port))]);
+                      await currentConnection.sendReliable([new MarkAssBrownPacket(newServer!.host, parseInt(newServer!.port, 10))]);
                       console.log("racism");
 
                       try {
                         await funnyPromise;
 
                         console.log("EPIC WIN HOLY SHIT");
+
                         return;
                       } catch (error) {
                         console.log("fuck (timed out before the funny happened)");
@@ -354,6 +357,8 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                         console.log("yo mama (the epic final(ly))");
                         this.gamecodePromiseAcceptMap.delete(`${lobby.getCode()}_${userData.client_id}`);
                         console.log("moving onto the next one...");
+
+                        // eslint-disable-next-line no-unsafe-finally
                         continue;
                       }
                     }
@@ -362,7 +367,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                   })();
                 });
 
-                this.server.on("server.lobby.join", async event => {
+                this.server.on("server.lobby.join", event => {
                   console.log("got join", event.getConnection().getCurrentScene());
 
                   const lobby = event.getLobby();
@@ -383,7 +388,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                       return;
                     }
 
-                    event.getConnection().sendReliable([new RedirectPacket(newServer.host, parseInt(newServer.port))]);
+                    event.getConnection().sendReliable([new RedirectPacket(newServer.host, parseInt(newServer.port, 10))]);
                     console.log("sent player to new server on", newServer.host, newServer.port);
                   }
                 });
@@ -474,13 +479,13 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     this.server.on("server.lobby.list", event => { event.cancel() });
     this.server.on("game.started", event => {
       this.redis.hmset(`loadpolus.lobby.${event.getGame().getLobby().getCode()}`, {
-        gameState: "Started"
+        gameState: "Started",
       });
     });
     this.server.on("game.ended", event => {
-      if (event.isCancelled()) return;
+      if (event.isCancelled()) { return }
       this.redis.hmset(`loadpolus.lobby.${event.getGame().getLobby().getCode()}`, {
-        gameState: "NotStarted"
+        gameState: "NotStarted",
       });
     });
 
@@ -489,7 +494,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     this.server.on("player.kicked", event => this.handlePlayerLeave(event.getPlayer()));
     this.server.on("player.banned", event => this.handlePlayerLeave(event.getPlayer()));
 
-    this.server.on("server.lobby.creating", async (event) => {
+    this.server.on("server.lobby.creating", async event => {
       if (this.isPendingShutdown) {
         console.log("server.lobby.creating but the server is shutting down >:(((((((");
 
@@ -595,7 +600,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
         const lobby = lobbies[i];
 
         this.redis.del(`loadpolus.lobby.${lobby.getCode()}`);
-        this.redis.del(`loadpolus.lobbyUuid.${lobby.getMeta<string>("pgg.log.uuid")}`)
+        this.redis.del(`loadpolus.lobbyUuid.${lobby.getMeta<string>("pgg.log.uuid")}`);
       }
 
       if (this.config?.creator) {
@@ -628,7 +633,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     });
   }
 
-  private handlePlayerJoin(player: PlayerInstance, lobby: LobbyInstance) {
+  private handlePlayerJoin(player: PlayerInstance, lobby: LobbyInstance): void {
     this.redis.set(
       `loadpolus.userUuid.${player.getSafeConnection().getMeta<UserResponseStructure>("pgg.auth.self").client_id}`,
       lobby.getCode(),
@@ -645,8 +650,14 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     );
   }
 
-  private handlePlayerLeave(player: PlayerInstance) {
-    this.redis.del(`loadpolus.userUuid.${player.getMeta<UserResponseStructure>("pgg.auth.self").client_id}`);
+  private handlePlayerLeave(player: PlayerInstance): void {
+    const connection = player.getConnection();
+
+    if (connection === undefined) {
+      return;
+    }
+
+    this.redis.del(`loadpolus.userUuid.${connection.getMeta<UserResponseStructure>("pgg.auth.self").client_id}`);
   }
 
   private updateHostList(lobby: LobbyInstance): void {
