@@ -70,7 +70,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
   private nodeAddress = this.server.getDefaultLobbyAddress();
   private readonly gameOptionsService = Services.get(ServiceType.GameOptions);
   private readonly hudService = Services.get(ServiceType.Hud);
-  private readonly serverVersion;
+  private readonly serverVersion: string;
   private readonly subscriberRedis: Redis.Redis;
   private isShuttingDown = false;
   private isPendingShutdown = false;
@@ -458,6 +458,16 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
           gamemode: option.getValue().options[option.getValue().index],
         });
       });
+
+      // :marihehe:
+
+      setTimeout(() => {
+        const option = this.gameOptionsService.getGameOptions<{ gamemode: EnumValue }>(lobby).getOption("gamemode");
+
+        this.redis.hmset(`loadpolus.lobby.${lobby.getCode()}`, {
+          gamemode: option.getValue().options[option.getValue().index],
+        });
+      }, 5000);
     });
 
     this.server.on("lobby.host.added", event => this.updateHostList(event.getLobby()));
