@@ -451,9 +451,9 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
 
       this.redis.sadd(`loadpolus.node.${this.nodeName}.lobbies`, lobby.getCode());
 
-      const customGameOptions = this.gameOptionsService.getGameOptions<{ gamemode: EnumValue }>(lobby);
+      const customGameOptions = this.gameOptionsService.getGameOptions<{ Gamemode: EnumValue }>(lobby);
 
-      customGameOptions.on("option.gamemode.changed", option => {
+      customGameOptions.on("option.Gamemode.changed", option => {
         this.redis.hmset(`loadpolus.lobby.${lobby.getCode()}`, {
           gamemode: option.getValue().options[option.getValue().index],
         });
@@ -462,7 +462,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
       // :marihehe:
 
       setTimeout(() => {
-        const option = this.gameOptionsService.getGameOptions<{ gamemode: EnumValue }>(lobby).getOption("gamemode");
+        const option = this.gameOptionsService.getGameOptions<{ Gamemode: EnumValue }>(lobby).getOption("Gamemode");
 
         this.redis.hmset(`loadpolus.lobby.${lobby.getCode()}`, {
           gamemode: option.getValue().options[option.getValue().index],
