@@ -603,26 +603,39 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
       });
     }
 
-    this.server.on("server.close", () => {
+    this.server.on("server.close", async () => {
+      console.log("Creating pipeline for shutdown");
+
       const lobbies = this.server.getLobbies();
+      const pipeline = this.redis.pipeline();
 
       for (let i = 0; i < lobbies.length; i++) {
         const lobby = lobbies[i];
 
-        this.redis.del(`loadpolus.lobby.${lobby.getCode()}`);
-        this.redis.del(`loadpolus.lobbyUuid.${lobby.getMeta<string>("pgg.log.uuid")}`);
+        pipeline.del(`loadpolus.lobby.${lobby.getCode()}`);
+        pipeline.del(`loadpolus.lobbyUuid.${lobby.getMeta<string>("pgg.log.uuid")}`);
       }
 
       if (this.config?.creator) {
-        this.redis.srem(`loadpolus.nodes.creator`, this.nodeName);
-        this.redis.srem(`loadpolus.nodes.${this.serverVersion}.creator`, this.nodeName);
+        pipeline.srem(`loadpolus.nodes.creator`, this.nodeName);
+        pipeline.srem(`loadpolus.nodes.${this.serverVersion}.creator`, this.nodeName);
       } else {
-        this.redis.srem(`loadpolus.nodes`, this.nodeName);
-        this.redis.srem(`loadpolus.nodes.${this.serverVersion}`, this.nodeName);
+        pipeline.srem(`loadpolus.nodes`, this.nodeName);
+        pipeline.srem(`loadpolus.nodes.${this.serverVersion}`, this.nodeName);
       }
 
-      this.redis.del(`loadpolus.node.${this.nodeName}.lobbies`);
-      this.redis.del(`loadpolus.node.${this.nodeName}`);
+      const connections = this.server.getConnections();
+
+      connections.forEach(connection => {
+        pipeline.del(`loadpolus.userUuid.${connection.getMeta<UserResponseStructure>("pgg.auth.self").client_id}`);
+      });
+
+      pipeline.del(`loadpolus.node.${this.nodeName}.lobbies`);
+      pipeline.del(`loadpolus.node.${this.nodeName}`);
+
+      console.log("Sending ", pipeline.length, "commands to Redis, awaiting response...");
+      await pipeline.exec();
+      console.log("Done! Cleaned up keys.");
     });
   }
 
