@@ -93,7 +93,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     config.redis.host = process.env.NP_REDIS_HOST?.trim() ?? config.redis.host ?? "127.0.0.1";
     config.redis.port = Number.isInteger(redisPort) ? redisPort : config.redis.port ?? 6379;
     config.redis.password = process.env.NP_REDIS_PASSWORD?.trim() ?? undefined;
-    //config.type = process.env.NP_IS_CREATOR_SERVER?.trim();
+    config.creator = process.env.NP_IS_CREATOR_SERVER?.trim().toLowerCase() === "true";
 
     if (config.redis.host.startsWith("rediss://")) {
       config.redis.host = config.redis.host.substr("rediss://".length);
