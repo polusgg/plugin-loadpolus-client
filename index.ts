@@ -90,6 +90,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     const redisPort = parseInt(process.env.NP_REDIS_PORT ?? "", 10);
 
     config.redis ??= {};
+    console.log(process.env);
     config.redis.host = process.env.NP_REDIS_HOST?.trim() ?? config.redis.host ?? "127.0.0.1";
     config.redis.port = Number.isInteger(redisPort) ? redisPort : config.redis.port ?? 6379;
     config.redis.password = process.env.NP_REDIS_PASSWORD?.trim() ?? undefined;
@@ -142,6 +143,21 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
         console.log(channel, message);
 
         switch (channel) {
+          case "node-communication": {
+            const data = JSON.parse(message);
+
+            switch (data.event) {
+              case "DISCONNECT": {
+                const connection = ([...this.server.getConnections().values()]).find(c => c.getMeta<string>("pgg.log.uuid") === data.user);
+
+                connection?.disconnect(DisconnectReason.custom(data.reason));
+                break;
+              }
+              default:
+                console.log("Unknown Node Communication Channel Message", data);
+            }
+            break;
+          }
           case "loadpolus.notifications": {
             const notification: Notification = JSON.parse(message);
 
@@ -401,6 +417,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
       this.subscriberRedis.subscribe("loadpolus.notifications");
       this.subscriberRedis.subscribe("loadpolus.shutdown");
       this.subscriberRedis.subscribe("loadpolus.transferred");
+      this.subscriberRedis.subscribe("node-communication");
     });
   }
 
@@ -444,6 +461,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
         gameState: GameState[lobby.getGameState()],
         gamemode: "<unknown>",
         "public": lobby.isPublic() ? "true" : "false",
+        uuid: lobby.getMeta<string>("pgg.log.uuid"),
         serverVersion: this.serverVersion,
         creator: this.config?.creator ? "true" : "false",
         transitioning: "false",
