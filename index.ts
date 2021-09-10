@@ -153,6 +153,14 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
                 connection?.disconnect(DisconnectReason.custom(data.reason));
                 break;
               }
+              case "NOTIFICATION": {
+                const connection = ([...this.server.getConnections().values()]).find(c => c.getMeta<string>("pgg.log.uuid") === data.user);
+
+                if (connection) {
+                  this.hudService.displayNotification(data.notification, [connection]);
+                }
+                break;
+              }
               default:
                 console.log("Unknown Node Communication Channel Message", data);
             }
@@ -481,6 +489,10 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
 
       setTimeout(() => {
         const option = this.gameOptionsService.getGameOptions<{ Gamemode: EnumValue }>(lobby).getOption("Gamemode");
+
+        if (lobby.getPlayers().length == 0) {
+          return;
+        }
 
         this.redis.hmset(`loadpolus.lobby.${lobby.getCode()}`, {
           gamemode: option.getValue().options[option.getValue().index],
