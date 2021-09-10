@@ -491,6 +491,8 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
         const option = this.gameOptionsService.getGameOptions<{ Gamemode: EnumValue }>(lobby).getOption("Gamemode");
 
         if (lobby.getPlayers().length == 0) {
+          this.redis.del(`loadpolus.lobby.${lobby.getCode()}`);
+
           return;
         }
 
