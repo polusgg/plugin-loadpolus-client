@@ -520,7 +520,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     this.server.on("player.banned", event => this.updateCurrentPlayers(event.getLobby()));
     this.server.on("server.lobby.list", event => { event.cancel() });
     this.server.on("game.started", event => {
-      if (event.getGame().getLobby().getPlayers().length == 0) {
+      if (event.getGame().getLobby().getPlayers().length <= 1) {
         this.redis.del(`loadpolus.lobby.${event.getGame().getLobby().getCode()}`);
 
         return;
@@ -533,7 +533,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
     this.server.on("game.ended", event => {
       if (event.isCancelled()) { return }
 
-      if (event.getGame().getLobby().getPlayers().length == 0) {
+      if (event.getGame().getLobby().getPlayers().length <= 1) {
         this.redis.del(`loadpolus.lobby.${event.getGame().getLobby().getCode()}`);
 
         return;
