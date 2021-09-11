@@ -641,7 +641,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
       this.server.on("server.lobby.join", event => {
         const connection = event.getConnection();
 
-        if (connection.getMeta<UserResponseStructure>("pgg.auth.self").perks.indexOf("server.access.creator") > -1) {
+        if (connection.getMeta<UserResponseStructure>("pgg.auth.self").perks.indexOf("server.access.creator") === -1) {
           event.cancel();
           event.setDisconnectReason(DisconnectReason.custom("You don't have permission to join this lobby."));
         }
