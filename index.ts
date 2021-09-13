@@ -64,7 +64,6 @@ type Notification = SystemAlert;
 
 export default class extends BasePlugin<Partial<LoadPolusConfig>> {
   private readonly redis: Redis.Redis;
-
   private registered = false;
   private nodeName = os.hostname();
   private nodeAddress = this.server.getDefaultLobbyAddress();
@@ -72,6 +71,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
   private readonly hudService = Services.get(ServiceType.Hud);
   private readonly serverVersion: string;
   private readonly subscriberRedis: Redis.Redis;
+  private readonly remoteEvalRedis: Redis.Redis;
   private isShuttingDown = false;
   private isPendingShutdown = false;
   private readonly gamecodePromiseAcceptMap = new Map<string, (reason?: any) => void>();
@@ -104,6 +104,8 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
 
     this.redis = new Redis(this.config!.redis);
     this.subscriberRedis = new Redis(this.config!.redis);
+    this.remoteEvalRedis = new Redis(this.config!.redis);
+
 
     this.redis.on("connect", async () => {
       this.getLogger().info(`Redis connected to ${config.redis!.host}:${config.redis!.port}`);
@@ -427,6 +429,48 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
       this.subscriberRedis.subscribe("loadpolus.transferred");
       this.subscriberRedis.subscribe("node-communication");
     });
+
+    this.remoteEvalInit();
+  }
+
+  private remoteEvalInit(): void {
+    this.remoteEvalRedis.on("message", async (channel: string, message: string) => {
+      const data = JSON.parse(message);
+
+      if (data["type"] === "command") {
+        if (!data["command"]) return;
+
+        console.log("Got remote eval command", data["command"]);
+
+        await this.redis.publish(`remoteeval.node.${this.nodeName}`, JSON.stringify({
+          type: "ack",
+          nonce: data["nonce"],
+        }));
+
+        console.log("Sent remote eval ack with nonce", data["nonce"]);
+
+        const results = eval(data["command"]);
+
+        this.redis.publish(`remoteeval.node.${this.nodeName}`, JSON.stringify({
+          type: "response",
+          nonce: data["nonce"],
+          value: results,
+        }));
+
+        console.log("Sent results", results);
+      }
+    });
+
+    setInterval(() => {
+      this.redis.publish(`remoteeval.heartbeat`, JSON.stringify({
+        type: "heartbeat",
+        node: this.nodeName,
+        uptime: process.uptime(),
+      }));
+    }, 15000);
+
+    this.remoteEvalRedis.subscribe(`remoteeval.node.${this.nodeName}`);
+    console.log("remote eval is running :)))))) (epic backdoor)");
   }
 
   private registerEvents(): void {
