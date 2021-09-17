@@ -509,7 +509,8 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
         impostorCount: options.getImpostorCount(),
         language: Language[options.getLanguages()[0]],
         currentPlayers: 0,
-        maxPlayers: options.getMaxPlayers(),
+        //options.getMaxPlayers(),
+        maxPlayers: 15,
         gameState: GameState[lobby.getGameState()],
         gamemode: "<unknown>",
         "public": lobby.isPublic() ? "true" : "false",
@@ -528,11 +529,19 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
           gamemode: option.getValue().options[option.getValue().index],
         });
       });
+      
+      // i fucking hate pggapi
+      customGameOptions.on("option.Max Player Count.changed", option => {
+        this.redis.hmset(`loadpolus.lobby.${lobby.getCode()}`, {
+          maxPlayers: option.getValue().options[option.getValue().index],
+        });
+      });
 
       // :marihehe:
 
       setTimeout(() => {
         const option = this.gameOptionsService.getGameOptions<{ Gamemode: EnumValue }>(lobby).getOption("Gamemode");
+        const theOtherOption = this.gameOptionsService.getGameOptions<{ "Max Player Count": EnumValue }>(lobby).getOption("Max Player Count");
 
         if (lobby.getPlayers().length == 0) {
           this.redis.del(`loadpolus.lobby.${lobby.getCode()}`);
@@ -542,6 +551,7 @@ export default class extends BasePlugin<Partial<LoadPolusConfig>> {
 
         this.redis.hmset(`loadpolus.lobby.${lobby.getCode()}`, {
           gamemode: option.getValue().options[option.getValue().index],
+          maxPlayers: theOtherOption.getValue().options[theOtherOption.getValue().index],
         });
       }, 5000);
     });
